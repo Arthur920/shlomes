@@ -6,17 +6,17 @@ we don't need an LLM just to read a diagram.
 
 ## Scope
 
-**Supported formats:**
+**Supported formats:** text-based only.
 
 | Format | Source | Nodes | Edges |
 |---|---|---|---|
 | Mermaid | ` ```mermaid ` blocks | ✅ | ✅ |
 | PlantUML | `@startuml` / ` ```plantuml ` | ✅ | ✅ |
 | Graphviz DOT | ` ```dot ` blocks, `*.dot` / `*.gv` | ✅ | ✅ |
-| SVG | `*.svg`, inline SVG | ✅ | ⚠️ tool-generated only |
 
-**Out of scope:** raster images (PNG/JPG), excalidraw, screenshots. No OCR, no
-vision model. If we ever revisit, it would be a separate opt-in path.
+**Out of scope:** SVG, raster images (PNG/JPG), excalidraw, screenshots. No XML
+geometry parsing, no OCR, no vision model. If we ever revisit, it would be a
+separate opt-in path.
 
 ## What "coherent" means, by diagram type
 
@@ -33,7 +33,7 @@ highest drift rate, cleanest grounding, mostly deterministic.
 
 ## The core check: graph diff
 
-For Mermaid/PlantUML/DOT (and tool-generated SVG):
+For Mermaid/PlantUML/DOT:
 
 1. Parse the diagram → declared `{nodes, edges}`.
 2. Build the **actual** module dependency graph from code (tree-sitter
@@ -45,22 +45,6 @@ For Mermaid/PlantUML/DOT (and tool-generated SVG):
    - real import not drawn → **missing arrow**
 
 Edge diffs are exactly what humans miss by eye.
-
-## SVG tiering
-
-SVG splits into two reliability tiers:
-
-- **Node labels** — always easy. Read `<text>` elements → check each against
-  code (reuses the node/path-existence machinery).
-- **Edges** — depend on origin:
-  - **Tool-generated** (Mermaid / D2 / Graphviz export): structure is embedded
-    via element `id`s, CSS classes (`<g class="edgePath">`), and `<title>` tags
-    like `A-->B`. Edges are recoverable.
-  - **Hand-drawn** (Figma / Illustrator): pure geometry. Inferring "which line
-    touches which box" from coordinates is unreliable — **skip edges**, emit a
-    `geometry-only SVG, edges not analyzed` note, still check nodes.
-
-Detect tool-generated SVG by its markers; never guess edges from raw geometry.
 
 ## Layer mapping
 
@@ -78,11 +62,9 @@ Detect tool-generated SVG by its markers; never guess edges from raw geometry.
 - New module `src/diagram/` with per-format parsers behind a `Diagram { nodes,
   edges, kind, source_span }` type.
 - Reuse the markdown walker to pull fenced ` ```mermaid|plantuml|dot ` blocks;
-  add `*.svg`/`*.dot`/`*.gv` to the file collector.
+  add `*.dot`/`*.gv` to the file collector.
 - Mermaid/DOT: small hand-written parsers for the graph subset (nodes + edges);
   defer full grammar.
-- SVG: parse with an XML reader (`quick-xml`); extract `<text>`, detect
-  tool-generated markers for edges.
 - Import graph: tree-sitter per language → emit module→module edges (shared with
   the Layer 2 chunker work).
 - Emit `Finding`s with the existing verdict types (`Stale`, `Contradicted`,
