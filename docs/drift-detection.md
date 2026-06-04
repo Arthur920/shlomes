@@ -100,6 +100,22 @@ The score is the signal:
 No i.i.d. assumption, no variance estimation, no minimum sample size — it works
 on a 3-claim repo and a 3000-claim one. The comparison *is* the early warning.
 
+## Evolutionary coupling — a no-LLM staleness prior
+
+Borrowed from architecture-inspection tools that mine **change coupling** — files
+that historically change together (sentrux's `git_stats` reports
+`coupling_pairs`; the "logical coupling" of mining-software-repositories
+research). Flip it for coherence:
+
+> A doc and the code it describes that *used to co-change but no longer do* = drift.
+
+If `auth.rs` has churned 20× while `docs/auth.md` sits frozen, that's a strong
+staleness prior — computed purely from git history, **no model, no embeddings, no
+LLM**. It feeds the `stale` verdict as a prior (and helps triage which claims to
+re-judge first), independent of the lineage/fingerprint path. See
+[architecture-rules.md](architecture-rules.md) for the broader set of
+inspection-tool transfers.
+
 ## Run pipeline
 
 ```
