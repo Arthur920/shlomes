@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="shlomes.png" alt="doc-aligner logo" width="320">
+</p>
+
 # doc-aligner
 
 A CLI that sanity-checks your `CLAUDE.md`, project docs (`*.md`), and the actual
