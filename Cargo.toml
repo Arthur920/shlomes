@@ -1,5 +1,5 @@
 [package]
-name = "doc-aligner"
+name = "shlomes"
 version = "0.0.1"
 edition = "2021"
 description = "Sanity-check CLAUDE.md, project docs, and code against each other for coherence drift."
@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [[bin]]
-name = "doc-aligner"
+name = "shlomes"
 path = "src/main.rs"
 
 [features]

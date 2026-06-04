@@ -63,7 +63,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("doc-aligner-{tag}-{nanos}"));
+        let dir = std::env::temp_dir().join(format!("shlomes-{tag}-{nanos}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

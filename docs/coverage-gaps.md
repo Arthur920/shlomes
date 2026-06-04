@@ -1,6 +1,6 @@
 # Coverage gaps (the code → doc traversal)
 
-Everything else in doc-aligner runs **doc → code**: extract a claim from the
+Everything else in shlomes runs **doc → code**: extract a claim from the
 docs, verify it against the code (claim ledger, lineage, fingerprints, the
 judge). A documentation **gap** is the opposite traversal — **code → doc**:
 here's code/behavior that *should* be described; is it?

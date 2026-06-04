@@ -1,12 +1,12 @@
 # Architecture rules & inspection inspirations
 
 Architecture-inspection tools (sentrux, ArchUnit, dependency-cruiser, NDepend,
-Structure101) check **code against rules**. doc-aligner checks **code against
+Structure101) check **code against rules**. shlomes checks **code against
 docs**. They converge the moment the docs *contain* the rules — which
 `CLAUDE.md` and architecture docs constantly do ("controllers must not touch the
 DB directly", "the domain layer has no framework deps").
 
-Reframed: **doc-aligner is partly an architecture-inspection tool whose rules are
+Reframed: **shlomes is partly an architecture-inspection tool whose rules are
 sourced from the docs instead of a separate config file.** That reframing extends
 the LLM-free tier substantially and closes a blind spot we couldn't otherwise
 close.
@@ -50,7 +50,7 @@ shared substrate rather than reimplementing AST import-walking three times.
 
 ## Other transfers
 
-| Architecture-tool concept | doc-aligner use |
+| Architecture-tool concept | shlomes use |
 |---|---|
 | **DSM / dependency graph** | substrate for diagram edge-diff + rule checks |
 | **Fitness functions** (`check_rules`) | deterministic checks for architectural prose claims; negative-claim handling |

@@ -21,7 +21,7 @@ Origins:
 
 ## The shared data structure: the claim ledger
 
-A **committed** sidecar (`.doc-aligner/ledger.json`) with one record per claim,
+A **committed** sidecar (`.shlomes/ledger.json`) with one record per claim,
 carried across runs. Deterministic facts only — no embedding vectors (those live
 in the gitignored Layer-2 vector cache, recomputed on demand), so the ledger is
 commit-safe and merge-friendly.
@@ -87,7 +87,7 @@ coherence. Fact extraction is the same tree-sitter pass used for provenance.
 ## Mechanism 3 — alignment score + CI regression gate (coverage gates)
 
 No control charts. Each run produces a single **alignment score** as an artifact
-(`.doc-aligner/score.json`): per-module and repo-level, e.g. severity-weighted
+(`.shlomes/score.json`): per-module and repo-level, e.g. severity-weighted
 `supported / total` over all claims.
 
 The score is the signal:

@@ -95,7 +95,7 @@ fn collect_chunks(repo_root: &Path) -> Vec<Chunk> {
         .into_iter()
         .filter_entry(|e| {
             let n = e.file_name().to_string_lossy();
-            n != ".git" && n != "target" && n != ".doc-aligner"
+            n != ".git" && n != "target" && n != ".shlomes"
         })
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())

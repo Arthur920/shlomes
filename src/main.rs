@@ -1,4 +1,4 @@
-//! doc-aligner command-line entry point.
+//! shlomes command-line entry point.
 
 mod extract;
 mod findings;
@@ -16,7 +16,7 @@ use crate::findings::Finding;
 
 #[derive(Parser)]
 #[command(
-    name = "doc-aligner",
+    name = "shlomes",
     version,
     about = "Check CLAUDE.md, project docs, and code against each other for coherence drift."
 )]
@@ -64,7 +64,7 @@ fn collect_docs(root: &Path) -> Vec<PathBuf> {
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            name != ".git" && name != ".doc-aligner"
+            name != ".git" && name != ".shlomes"
         })
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())

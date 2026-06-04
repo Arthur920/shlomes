@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="shlomes.png" alt="doc-aligner logo" width="320">
+  <img src="shlomes.png" alt="shlomes logo" width="320">
 </p>
 
-# doc-aligner
+# shlomes
 
 A CLI that sanity-checks your `CLAUDE.md`, project docs (`*.md`), and the actual
 codebase against each other to surface **coherence drift** — places where the
@@ -76,19 +76,19 @@ This is RAG-style fact-checking, the part embeddings *cannot* do alone.
 ## Usage (planned)
 
 ```bash
-doc-aligner check                 # full repo (layer 1, deterministic)
-doc-aligner check --diff main     # only what changed vs main
-doc-aligner check --format json   # machine-readable findings
-doc-aligner check --layer 1       # deterministic only (no model needed)
+shlomes check                 # full repo (layer 1, deterministic)
+shlomes check --diff main     # only what changed vs main
+shlomes check --format json   # machine-readable findings
+shlomes check --layer 1       # deterministic only (no model needed)
 
 # Layer 2 — local semantic code search (requires the `ml` feature build)
-doc-aligner retrieve "where is auth handled" --k 5
+shlomes retrieve "where is auth handled" --k 5
 ```
 
 ## Build (dev)
 
 ```bash
-cargo build                          # debug binary at target/debug/doc-aligner
+cargo build                          # debug binary at target/debug/shlomes
 cargo test                           # unit tests (layer 1)
 cargo run -- check .                 # run against this repo
 
@@ -96,7 +96,7 @@ cargo run -- check .                 # run against this repo
 cargo build --features ml
 cargo run --features ml -- retrieve "query" --k 5
 
-cargo install --path .               # install the `doc-aligner` binary
+cargo install --path .               # install the `shlomes` binary
 ```
 
 Layer 1 (deterministic) builds with no extra features. Layer 2 (retrieval) lives

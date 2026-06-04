@@ -1,9 +1,9 @@
 # Rust
 /target/
 
-# doc-aligner cache
-.doc-aligner/
-.doc-aligner-cache/
+# shlomes cache
+.shlomes/
+.shlomes-cache/
 
 # fastembed model cache (downloaded ONNX models, hundreds of MB)
 .fastembed_cache/

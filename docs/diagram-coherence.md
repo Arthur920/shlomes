@@ -141,6 +141,6 @@ tokens, which sequence-diagram support needs anyway.
 ## Dogfood
 
 The README's architecture diagram is currently ASCII (not machine-checkable).
-Converting it to a Mermaid `graph` makes doc-aligner able to verify its own
+Converting it to a Mermaid `graph` makes shlomes able to verify its own
 architecture (`extract` / `retrieve` / `verify` modules and their `use` edges)
 against `src/` — a clean first fixture.

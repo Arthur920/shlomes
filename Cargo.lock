@@ -601,20 +601,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doc-aligner"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "clap",
- "fastembed",
- "hf-hub",
- "regex",
- "serde",
- "serde_json",
- "walkdir",
-]
-
-[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2345,6 +2331,20 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "shlomes"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fastembed",
+ "hf-hub",
+ "regex",
+ "serde",
+ "serde_json",
+ "walkdir",
+]
 
 [[package]]
 name = "simd-adler32"
