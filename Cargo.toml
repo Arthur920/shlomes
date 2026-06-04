@@ -10,6 +10,12 @@ readme = "README.md"
 name = "doc-aligner"
 path = "src/main.rs"
 
+[features]
+default = []
+# Layer 2 local retrieval: jina code embeddings via fastembed (ONNX, fully
+# offline after the first model download). Layer 3 (LLM judge) will extend this.
+ml = ["dep:fastembed", "dep:anyhow", "dep:hf-hub"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
@@ -17,11 +23,13 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Layer 2/3 (retrieval + LLM judge) deps land behind a feature flag so the
-# deterministic build stays lean and dependency-light:
-#   reqwest, serde_json (HTTP to embedding/Anthropic APIs)
-#   tree-sitter + grammars (AST facts)
-#   ndarray (cosine / top-k)
+# Layer 2 (local embeddings). Optional so the deterministic build stays lean.
+fastembed = { version = "5", optional = true }
+anyhow = { version = "1", optional = true }
+# Used to fetch the *quantized* jina ONNX (fastembed's built-in variant only
+# offers fp32). Feature flags mirror fastembed's own hf-hub usage so cargo
+# unifies to a single crate instance / TLS stack.
+hf-hub = { version = "0.5", default-features = false, features = ["ureq", "native-tls"], optional = true }
 
 [profile.release]
 strip = true

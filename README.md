@@ -49,8 +49,13 @@ real drift on its own.
 ### Layer 2 — Retrieval (this is where embeddings belong)
 For claims that aren't deterministically checkable ("the cache invalidates on
 write"), embed doc claims and code chunks, retrieve the top-k relevant code via
-cosine similarity, optionally rerank. Embeddings + AST chunking, cached by
-content hash.
+cosine similarity, optionally rerank.
+
+Implemented with **local embeddings** via [`fastembed`](https://crates.io/crates/fastembed)
+and the `jina-embeddings-v2-base-code` model (ONNX, ~160 MB, downloaded once then
+fully offline). Code never leaves the machine. AST/tree-sitter chunking and a
+content-hash vector cache are the next steps; today it uses overlapping line
+windows.
 
 ### Layer 3 — Verification (LLM-as-judge)
 The actual coherence judgment: hand the LLM `(claim, retrieved evidence)` and ask
@@ -67,21 +72,29 @@ This is RAG-style fact-checking, the part embeddings *cannot* do alone.
 ## Usage (planned)
 
 ```bash
-doc-aligner check                 # full repo
+doc-aligner check                 # full repo (layer 1, deterministic)
 doc-aligner check --diff main     # only what changed vs main
 doc-aligner check --format json   # machine-readable findings
-doc-aligner check --layer 1       # deterministic only (no API key needed)
+doc-aligner check --layer 1       # deterministic only (no model needed)
+
+# Layer 2 — local semantic code search (requires the `ml` feature build)
+doc-aligner retrieve "where is auth handled" --k 5
 ```
 
 ## Build (dev)
 
 ```bash
-cargo build              # debug binary at target/debug/doc-aligner
-cargo test               # unit tests (layer 1)
-cargo run -- check .     # run against this repo
-cargo install --path .   # install the `doc-aligner` binary
+cargo build                          # debug binary at target/debug/doc-aligner
+cargo test                           # unit tests (layer 1)
+cargo run -- check .                 # run against this repo
+
+# Layer 2 (local jina embeddings) is behind the `ml` feature:
+cargo build --features ml
+cargo run --features ml -- retrieve "query" --k 5
+
+cargo install --path .               # install the `doc-aligner` binary
 ```
 
-Layer 1 (deterministic) builds with no extra features. Layers 2–3 (retrieval +
-LLM judge) will land behind an `ml` cargo feature so the default build stays
-lean.
+Layer 1 (deterministic) builds with no extra features. Layer 2 (retrieval) lives
+behind the `ml` feature so the default build stays lean. Layer 3 (LLM judge) will
+extend the same feature.

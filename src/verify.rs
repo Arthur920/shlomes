@@ -42,15 +42,6 @@ fn tree_contains(root: &Path, suffix: &str) -> bool {
         .any(|e| e.path().to_string_lossy().ends_with(suffix))
 }
 
-/// Layer 2: embed claims + code, return top-k relevant code chunks.
-///
-/// Not yet implemented. Will live behind a `ml` cargo feature (HTTP embedding
-/// backend + ndarray) and cache vectors by content hash.
-#[allow(dead_code)]
-pub fn retrieve_evidence(_claim: &str, _repo_root: &Path) -> Vec<String> {
-    unimplemented!("Layer 2 (retrieval) is not implemented yet.")
-}
-
 /// Layer 3: LLM-as-judge over (claim, evidence) -> Verdict.
 ///
 /// Not yet implemented. Will live behind a `ml` cargo feature (HTTP to the

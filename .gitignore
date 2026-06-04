@@ -5,6 +5,9 @@
 .doc-aligner/
 .doc-aligner-cache/
 
+# fastembed model cache (downloaded ONNX models, hundreds of MB)
+.fastembed_cache/
+
 # Env / secrets
 .env
 .env.*

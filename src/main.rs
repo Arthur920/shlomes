@@ -2,6 +2,7 @@
 
 mod extract;
 mod findings;
+#[cfg(feature = "ml")]
 mod retrieve;
 mod verify;
 
@@ -37,6 +38,18 @@ enum Commands {
         /// Max layer: 1 deterministic, 2 +retrieval, 3 +LLM (1 only for now).
         #[arg(long, default_value_t = 1)]
         layer: u8,
+    },
+    /// Semantic code search using local jina embeddings (requires `ml` feature).
+    #[cfg(feature = "ml")]
+    Retrieve {
+        /// Natural-language or code query.
+        query: String,
+        /// Repo root (default: cwd).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Number of chunks to return.
+        #[arg(long, default_value_t = 5)]
+        k: usize,
     },
 }
 
@@ -119,6 +132,22 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
+            }
+        }
+        #[cfg(feature = "ml")]
+        Commands::Retrieve { query, path, k } => {
+            let root = std::fs::canonicalize(&path).unwrap_or(path);
+            match retrieve::retrieve(&root, std::slice::from_ref(&query), k) {
+                Ok(per_query) => {
+                    for hit in &per_query[0] {
+                        println!("{:.3}  {}:{}", hit.score, hit.path, hit.start_line);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
             }
         }
     }
