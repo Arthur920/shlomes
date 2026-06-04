@@ -81,6 +81,9 @@ shlomes check --diff main     # only what changed vs main
 shlomes check --format json   # machine-readable findings
 shlomes check --layer 1       # deterministic only (no model needed)
 
+shlomes index                 # extract code symbols + dependency edges (tree-sitter)
+shlomes index --format json   # machine-readable index
+
 # Layer 2 — local semantic code search (requires the `ml` feature build)
 shlomes retrieve "where is auth handled" --k 5
 ```

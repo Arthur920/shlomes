@@ -12,17 +12,14 @@ use fastembed::{
     InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
 };
 use hf_hub::api::sync::Api;
-use walkdir::WalkDir;
+
+use crate::code::lang;
 
 /// HuggingFace repo + the int8-quantized ONNX (162 MB vs the 642 MB fp32 that
 /// fastembed's built-in `JinaEmbeddingsV2BaseCode` variant would download).
 const MODEL_REPO: &str = "jinaai/jina-embeddings-v2-base-code";
 const QUANTIZED_ONNX: &str = "onnx/model_quantized.onnx";
 
-const CODE_EXTS: &[&str] = &[
-    "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "rb", "c", "h", "cpp", "hpp", "cc", "cs",
-    "php", "swift", "kt", "scala", "sh", "toml", "yaml", "yml",
-];
 const CHUNK_LINES: usize = 40;
 const CHUNK_OVERLAP: usize = 10;
 
@@ -40,13 +37,6 @@ pub struct Hit {
     /// Chunk body — evidence passed to the Layer 3 judge (not printed yet).
     #[allow(dead_code)]
     pub text: String,
-}
-
-fn is_code(p: &Path) -> bool {
-    p.extension()
-        .and_then(|s| s.to_str())
-        .map(|e| CODE_EXTS.contains(&e))
-        .unwrap_or(false)
 }
 
 fn chunk_file(path: &str, content: &str) -> Vec<Chunk> {
@@ -91,25 +81,13 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 
 fn collect_chunks(repo_root: &Path) -> Vec<Chunk> {
     let mut chunks = Vec::new();
-    for e in WalkDir::new(repo_root)
-        .into_iter()
-        .filter_entry(|e| {
-            let n = e.file_name().to_string_lossy();
-            n != ".git" && n != "target" && n != ".shlomes"
-        })
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        let p = e.path();
-        if !is_code(p) {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(p) else {
+    for p in lang::code_files(repo_root) {
+        let Ok(content) = std::fs::read_to_string(&p) else {
             continue;
         };
         let rel = p
             .strip_prefix(repo_root)
-            .unwrap_or(p)
+            .unwrap_or(&p)
             .to_string_lossy()
             .to_string();
         chunks.extend(chunk_file(&rel, &content));

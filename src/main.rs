@@ -1,10 +1,13 @@
 //! shlomes command-line entry point.
 
+mod code;
 mod extract;
 mod findings;
 #[cfg(feature = "ml")]
 mod retrieve;
 mod verify;
+
+use code::CodeIndex;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -38,6 +41,15 @@ enum Commands {
         /// Max layer: 1 deterministic, 2 +retrieval, 3 +LLM (1 only for now).
         #[arg(long, default_value_t = 1)]
         layer: u8,
+    },
+    /// Extract and print the code index (symbols + dependency edges).
+    Index {
+        /// Repo root (default: cwd).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
     },
     /// Semantic code search using local jina embeddings (requires `ml` feature).
     #[cfg(feature = "ml")]
@@ -114,6 +126,30 @@ fn report(findings: &[Finding], format: Format) {
     }
 }
 
+fn report_index(index: &CodeIndex, format: Format) {
+    match format {
+        Format::Json => {
+            println!("{}", serde_json::to_string_pretty(index).unwrap());
+        }
+        Format::Text => {
+            for s in &index.symbols {
+                println!(
+                    "[{:?}/{:?}] {} ({}:{})",
+                    s.kind, s.visibility, s.qualified_name, s.span.path, s.span.start_line
+                );
+            }
+            for e in &index.edges {
+                println!("edge  {} -> {}", e.from_module, e.to_module);
+            }
+            println!(
+                "\n{} symbol(s), {} edge(s)",
+                index.symbols.len(),
+                index.edges.len()
+            );
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -133,6 +169,12 @@ fn main() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Commands::Index { path, format } => {
+            let root = std::fs::canonicalize(&path).unwrap_or(path);
+            let index = CodeIndex::build(&root);
+            report_index(&index, format);
+            ExitCode::SUCCESS
         }
         #[cfg(feature = "ml")]
         Commands::Retrieve { query, path, k } => {
