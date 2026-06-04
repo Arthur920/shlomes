@@ -1,112 +1,130 @@
 # Drift detection (Layer 0)
 
-A cheap, LLM-free layer that sits *underneath* Layers 1–3 and makes coherence
-**incremental** (only re-check what changed) and **temporal** (track drift over
-time, not just a snapshot). Three mechanisms, borrowed from three unrelated
-domains, that share one data structure.
+A cheap, LLM-free layer that sits *underneath* Layers 1–3: it makes coherence
+**incremental** (only re-check what changed) and produces a **comparable
+alignment score** so CI can flag regressions. Mechanisms borrowed from three
+unrelated domains, sharing one data structure.
 
 Origins:
 - **Provenance / incremental view maintenance** — databases
-- **Semantic-hash baseline** — file-integrity monitoring / Tripwire (security)
-- **SPC control charts (EWMA / CUSUM)** — manufacturing / Six Sigma
+- **Semantic (behavioral-fact) baseline** — file-integrity monitoring / Tripwire (security)
+- **Score-regression gate** — code-coverage CI gates (codecov-style base-vs-PR)
+
+## Decisions (locked)
+
+| Concern | Decision | Why |
+|---|---|---|
+| Ledger location | **Committed, facts-only** (no embeddings) | Reproducible across devs, works cold in CI, no thrash on model bumps |
+| Fingerprint | **Behavioral facts** (not embeddings) | Catches small-token/high-semantic edits (`3→5`, `if→if!`, dropped `.sort()`); ignores renames |
+| Provenance anchor | **Symbol-anchored** (qualified names) | Survives moves/renames that silently break line ranges |
+| Temporal | **No SPC.** Alignment score as artifact, CI compares base vs head | No statistical footing needed; works at any volume |
 
 ## The shared data structure: the claim ledger
 
-A persisted sidecar (`.doc-aligner/ledger.*`, gitignored) with one record per
-claim, carried across runs:
+A **committed** sidecar (`.doc-aligner/ledger.json`) with one record per claim,
+carried across runs. Deterministic facts only — no embedding vectors (those live
+in the gitignored Layer-2 vector cache, recomputed on demand), so the ledger is
+commit-safe and merge-friendly.
 
 ```
 ClaimRecord {
-  id:           stable hash of (doc_path + normalized claim text)
-  doc_ref:      path:line of the claim
-  provenance:   [ CodeSpan { path, start_line, end_line } ]   # what it was derived from
-  fingerprint:  semantic hash of the provenance at last verification
-  verdict:      supported | contradicted | stale | unverifiable
-  commit:       git sha at last verification
-  score:        per-claim coherence score (for SPC)
+  id:          stable hash of (doc_path + normalized claim text)
+  doc_ref:     path:line of the claim
+  provenance:  [ Symbol { qualified_name, kind } ]   # symbol-anchored
+  facts:       behavioral facts of those symbols (constants, signature,
+               control-flow predicates, return shape)
+  facts_hash:  hash of `facts` at last verification
+  verdict:     supported | contradicted | stale | unverifiable
+  commit:      git sha at last verification
 }
 ```
 
-`provenance` and `fingerprint` are produced as a *byproduct* of the existing
-layers — no extra work:
-- Layer 1 path/symbol claims → the span is the referenced file/symbol.
-- Layer 2 retrieval → the retrieved top-k chunks **are** the provenance.
+`provenance` and `facts` are a byproduct of the existing layers + a tree-sitter
+pass shared with Layer 2's chunker:
+- Layer 1 path/symbol claims → the symbol is the reference itself.
+- Layer 2 retrieval → the retrieved chunks resolve to their enclosing symbols.
 - Layer 3 → the evidence it judged on.
-
-(The `Finding.code_refs` field already exists for this.)
 
 ## Mechanism 1 — provenance / lineage invalidation (databases)
 
-A doc is a **materialized view over the code** (the base tables). DB engines
-don't recompute a view on every write — they track lineage and invalidate only
-the views whose inputs changed.
+A doc is a **materialized view over the code**. DB engines invalidate only the
+views whose inputs changed, via lineage. We do the same, **symbol-anchored**:
 
-On a run scoped to a diff (`--diff <ref>`):
-1. Get changed line ranges per file from `git diff`.
-2. Intersect each claim's `provenance` spans with those ranges.
-3. Claims whose lineage touched the diff → **dirty**; everything else is known
-   coherent from the last run and skipped.
+1. From `git diff` (with rename detection), map changed line ranges → changed
+   **symbols** (tree-sitter), not just files.
+2. A claim is **dirty** if any of its `provenance` symbols changed *or moved*.
+3. Unchanged claims carry forward their last verdict.
 
-Turns coherence from "re-scan everything" into "invalidate by lineage." The
-instant underlying code changes, the dependent claims are surfaced.
+Symbol anchoring is what makes this survive a function moving files — the common
+refactor that silently defeats line-range lineage.
 
-## Mechanism 2 — semantic-hash baseline (Tripwire / FIM)
+**Known blind spot (by design):** lineage only sees code a claim already points
+at. It cannot catch drift in **net-new code** or **negative/absence claims**
+("we never log PII", "no DB access from controllers") — there's no positive span
+to anchor. Those need a separate forbidden-pattern / AST-query check; out of
+scope for Layer 0 but tracked. Because of this, lineage is a *narrowing
+optimization that sits behind a periodic full scan*, never a replacement for it.
 
-Host-intrusion tools keep a known-good baseline of file hashes and alarm on
-drift. We swap *textual* hashes for **semantic** ones. Each claim records the
-fingerprint of the code version it described.
+## Mechanism 2 — behavioral-fact baseline (Tripwire / FIM)
 
-For a dirty claim, recompute the fingerprint of its provenance spans and compare
-to the stored baseline:
-- **AST fingerprint** — structural hash of the symbol (normalized
-  signature + body). Exact, cheap, catches structural change.
-- **Embedding fingerprint** — the chunk vector (reuses Layer 2). Drift =
-  cosine distance from the stored vector; catches *semantic* change even when a
-  refactor barely touches the text.
+Tripwire alarms when a file drifts from a known-good baseline. We swap the
+*textual* hash for a **behavioral-fact** hash — deliberately **not** an embedding,
+which has inverted sensitivity for this task (embeddings barely move on `3→5` or
+`if→if!`, yet jump on harmless renames).
 
-If the fingerprint moved past a threshold → flag `stale` **immediately, no LLM**.
-Only claims that genuinely changed escalate to Layer 2/3. This is the main cost
-lever — the expensive LLM judge runs on a tiny fraction of claims.
+For each provenance symbol, extract and hash the facts that actually carry
+meaning:
+- literal **constants** (`retries = 3`, timeouts, limits)
+- **signature** (name, params, types)
+- **control-flow predicates** (the conditions, including negation)
+- **return shape / type**
 
-## Mechanism 3 — SPC over time (manufacturing)
+A dirty claim recomputes its `facts_hash`; if it differs from the baseline →
+flag cheaply (no LLM). Only genuinely ambiguous changes escalate to Layer 2/3.
+Deterministic, model-independent, and sensitive to exactly the edits that break
+coherence. Fact extraction is the same tree-sitter pass used for provenance.
 
-Every other check is a snapshot. SPC monitors a *process*. Append each per-module
-coherence score to a time series (one point per commit) and run:
-- **EWMA** — exponentially-weighted moving average + control limits; smooths
-  noise, flags sustained shifts.
-- **CUSUM** — accumulates small deviations; detects **drift onset** (a module
-  starting to trend out of spec) faster than a snapshot threshold ever could.
+## Mechanism 3 — alignment score + CI regression gate (coverage gates)
 
-Emits early warnings — "auth/ coherence has been trending down over the last 6
-commits" — before anything is grossly wrong. Coherence becomes a monitored
-signal with early warning, not a binary pass/fail gate.
+No control charts. Each run produces a single **alignment score** as an artifact
+(`.doc-aligner/score.json`): per-module and repo-level, e.g. severity-weighted
+`supported / total` over all claims.
+
+The score is the signal:
+- **CI** computes the score on the PR head and compares it to the base branch's
+  committed score. A regression beyond tolerance **fails the check** — exactly the
+  codecov pattern.
+- Carry-forward verdicts (Mechanism 1) keep this cheap: only dirty claims are
+  re-judged, the aggregate is recomputed, and the scalar is still comparable.
+
+No i.i.d. assumption, no variance estimation, no minimum sample size — it works
+on a 3-claim repo and a 3000-claim one. The comparison *is* the early warning.
 
 ## Run pipeline
 
 ```
-1. load ledger, determine diff vs ledger.commit (or --diff <ref>)
-2. lineage invalidation      → mark dirty claims            (mechanism 1)
+1. load ledger; diff vs ledger.commit (or --diff <ref>) → changed symbols
+2. lineage: claims whose provenance symbols changed/moved → dirty      (mech 1)
 3. for dirty claims:
-     recompute semantic fingerprint
-     drifted past threshold?  → verdict = stale, cheaply    (mechanism 2)
-     ambiguous?               → escalate to Layer 2/3
-4. write back verdicts + fingerprints + commit + scores
-5. append per-module scores to time series; run EWMA/CUSUM  (mechanism 3)
-6. report: findings + any drift-onset warnings
+     re-extract behavioral facts; facts_hash changed?
+       → flag/recheck cheaply; escalate ambiguous to Layer 2/3         (mech 2)
+   unchanged claims → carry forward last verdict
+4. compute alignment score (per-module + repo)                         (mech 3)
+5. write back ledger (facts, hashes, verdicts, commit) + score artifact
+6. CI: compare score vs base; regression beyond tolerance → fail
+7. report findings + score delta
 ```
 
-Cost: steps 1–2 are O(diff), step 3's hash is O(dirty), LLM only on the
-ambiguous remainder. Steps 5–6 are arithmetic over a small series.
+Steps 1–3 are O(diff + dirty); the LLM runs only on the ambiguous remainder.
 
 ## Open questions
 
-- **Claim identity across edits**: hashing normalized claim text means editing a
-  claim retires the old record and starts a new one (losing its history). Accept
-  that, or fuzzy-match to carry history forward?
-- **Fingerprint threshold**: cosine cutoff for "drifted." Per-language? Learned
-  from a repo's own change distribution?
-- **Store**: start with JSON; move to SQLite if the time-series/history grows.
-- **Cold start**: first run establishes the baseline (record everything, no
-  alarms); alarms begin on run two.
-- **Score definition**: per-module `supported / total`, or weight by verdict
-  severity?
+- **Negative / net-new code**: the lineage blind spot above needs a separate
+  forbidden-pattern check. Design separately.
+- **Fact extraction coverage**: which behavioral facts per language? Start with
+  constants + signatures, expand to predicates/return shape.
+- **Score formula + tolerance**: severity weights? absolute vs relative
+  regression threshold? per-module gates vs repo-level?
+- **Claim identity across edits**: editing a claim's text retires the old record
+  (loses its history). Acceptable for a base-vs-head gate, since both sides are
+  recomputed — confirm that's fine before relying on history elsewhere.
