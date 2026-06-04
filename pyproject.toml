@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "doc-aligner"
+version = "0.0.1"
+description = "Sanity-check CLAUDE.md, project docs, and code against each other for coherence drift."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+# Layer 2/3 deps live here so layer-1 (deterministic) runs with zero extras.
+ml = ["anthropic>=0.40", "numpy>=1.26"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+doc-aligner = "doc_aligner.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/doc_aligner"]
+
+[tool.ruff]
+line-length = 100
