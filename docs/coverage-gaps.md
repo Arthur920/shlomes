@@ -43,6 +43,28 @@ For each surface element: is it referenced/described in any doc? This is the
 A surface element with no doc reference → **`undocumented`** verdict. Fully
 deterministic, no model.
 
+### Reachability, not just name-presence
+
+Flat "does a doc name this symbol?" is the cheap version. The richer model treats
+coverage as a **bipartite graph**: doc-concept nodes on one side, code symbols on
+the other, edges where a doc references a symbol. Layered on top of the code's own
+**dependency edges** (which the extractor already emits), this lets us
+*disambiguate* the two reasons a symbol can be an orphan — which flat presence
+cannot:
+
+| Inbound **code** refs | Inbound **doc** refs | Diagnosis |
+|---|---|---|
+| yes | yes | covered |
+| yes | no  | **`undocumented`** — live code no doc reaches |
+| no  | no  | **dead code**, not a doc gap (route to architecture-rules, not a finding) |
+| no  | yes | doc describes code nothing calls — stale doc / removed feature |
+
+So an orphan with no doc path *and* no callers isn't a documentation gap — it's
+dead code, and flagging it as "undocumented" would be noise. The dependency graph
+is what tells the two apart. Reachability also generalizes "documented": a symbol
+reachable only *through* a documented neighbor (transitively) is weaker coverage
+than a directly-described one — a future ranking signal, not a v1 verdict.
+
 ## 3. Risk-weighting (borrowed from `test_gaps`)
 
 The part that makes this *usable* instead of noise. sentrux's `test_gaps` doesn't
@@ -74,6 +96,29 @@ This is a **separate, softer** verdict (`under-documented`) from the determinist
 `undocumented`. Keep them distinct: presence is free and exact; adequacy needs
 the LLM and is opt-in.
 
+## 6. Terminology drift (glossary coherence)
+
+`undocumented` means *no doc mentions this concept*. The adjacent failure is when
+the doc and the code **both** describe a concept but under **different names** —
+docs say "Account," the public API says `Customer`; docs say "tenant," the code
+says `Workspace`. The concept is "covered" by a name-presence check yet the
+vocabulary has diverged, which is its own coherence defect (and a real source of
+onboarding friction).
+
+Scope this **narrowly** to keep it usable:
+- only **public / domain** terms — exported types, modules, endpoints, config
+  keys — never every identifier. (A hard lexicon gate over all identifiers — the
+  strong "Whorfian linter" — is a non-starter: internal helpers and locals would
+  drown it in false positives.)
+- a **soft finding**, never a build gate.
+
+Detection: build a term set from the documentable surface and a term set from the
+docs' domain prose; a public concept whose doc-side synonym scores high on
+Layer-2 similarity but mismatches on exact/qualified name → **`term-drift`**.
+This deliberately reuses the same exact → qualified → Layer-2-fuzzy ladder as
+reference resolution (see Open questions); term-drift is the case where the fuzzy
+match succeeds but the exact one didn't.
+
 ## New verdicts
 
 The existing vocabulary (missing / stale / structural-mismatch / broken-example /
@@ -84,6 +129,7 @@ the tell that gaps weren't first-class. Add:
 |---|---|---|
 | `undocumented` | surface element no doc references | ❌ deterministic |
 | `under-documented` | documented but missing key behavior (errors, side effects) | ✅ judge |
+| `term-drift` | public concept covered, but doc & code names diverge | ⚠️ Layer-2 |
 
 ## Score integration
 
