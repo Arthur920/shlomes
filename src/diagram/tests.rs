@@ -34,7 +34,7 @@ fn phantom_edge_is_contradicted() {
         &["src/api", "src/domain", "src/db"],
     );
     let md = mermaid("graph TD\n  api[src/api] --> db[src/db]");
-    let f = check(&md, "doc.md", &index);
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].verdict, Verdict::Contradicted);
     assert_eq!(f[0].code_refs, vec!["src/api -> src/db"]);
@@ -44,7 +44,7 @@ fn phantom_edge_is_contradicted() {
 fn drawn_real_edge_is_clean() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     let md = mermaid("graph TD\n  api[src/api] --> domain[src/domain]");
-    let f = check(&md, "doc.md", &index);
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -54,7 +54,7 @@ fn ungrounded_endpoint_is_skipped() {
     // `User` matches no module → the edge is external, not a phantom; and `User`
     // has no path separator so it is not a stale box either.
     let md = mermaid("graph TD\n  User --> api[src/api]");
-    assert!(check(&md, "doc.md", &index).is_empty(), "{:?}", check(&md, "doc.md", &index));
+    assert!(check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(), "{:?}", check(&md, "doc.md", &index, std::path::Path::new(".")));
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn undirected_edge_matches_either_direction() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     // Drawn undirected; real import runs api->domain. Should be clean.
     let md = mermaid("graph TD\n  domain[src/domain] --- api[src/api]");
-    let f = check(&md, "doc.md", &index);
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -71,7 +71,7 @@ fn stale_box_with_path_label_is_stale() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     // `src/legacy` resolves to no module; the `/` marks it as module-intent.
     let md = mermaid("graph TD\n  api[src/api] --> legacy[src/legacy]");
-    let f = check(&md, "doc.md", &index);
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
     // api->legacy is skipped (legacy ungrounded); the box itself is stale.
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].verdict, Verdict::Stale);
@@ -83,7 +83,7 @@ fn missing_arrow_between_drawn_boxes_is_undocumented() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     // Both boxes drawn, but the real api->domain import is not drawn.
     let md = mermaid("graph TD\n  api[src/api]\n  domain[src/domain]");
-    let f = check(&md, "doc.md", &index);
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].verdict, Verdict::Undocumented);
     assert_eq!(f[0].code_refs, vec!["src/api -> src/domain"]);
@@ -95,7 +95,7 @@ fn omitted_module_does_not_trigger_missing_arrow() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     let md = mermaid("graph TD\n  api[src/api] --> other\n");
     // api->other is phantom only if `other` grounds; it doesn't, so skipped.
-    assert!(check(&md, "doc.md", &index).is_empty());
+    assert!(check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty());
 }
 
 // ---- parsers --------------------------------------------------------------
@@ -170,4 +170,59 @@ fn sources_extracts_each_format() {
 fn sources_ignores_non_diagram_fence() {
     let md = "```rust\n@startuml not a diagram\nlet x = 1;\n```\n";
     assert!(sources(md).is_empty());
+}
+
+/// End-to-end dogfood: build a *real* index via tree-sitter from temp source,
+/// then run class + sequence diagrams through the full `check` dispatch. Proves
+/// `Symbol.calls`/`members` populate and grounding works on real extraction
+/// (the per-module tests use synthetic indexes).
+#[test]
+fn class_and_sequence_ground_against_a_real_index() {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("shlomes-dogfood-{nanos}"));
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("src/svc.rs"),
+        "pub struct Service {}\n\
+         impl Service {\n\
+         \x20   pub fn validate(&self) {}\n\
+         \x20   pub fn save(&self) {}\n\
+         }\n\
+         pub fn handle() {\n\
+         \x20   step_one();\n\
+         \x20   step_two();\n\
+         }\n\
+         fn step_one() {}\n\
+         fn step_two() {}\n",
+    )
+    .unwrap();
+
+    let index = crate::code::CodeIndex::build(&dir);
+
+    // Class diagram: `validate` is real, `purge` is not.
+    let class = mermaid(
+        "classDiagram\n  class Service {\n    +validate()\n    +purge()\n  }",
+    );
+    let cf = check(&class, "doc.md", &index, &dir);
+    assert!(
+        cf.iter().any(|f| f.verdict == Verdict::Supported && f.claim.contains("validate")),
+        "{cf:?}"
+    );
+    assert!(
+        cf.iter().any(|f| f.verdict == Verdict::Stale && f.detail.contains("purge")),
+        "{cf:?}"
+    );
+
+    // Sequence diagram: `handle` calls step_one then step_two, in order.
+    let seq = mermaid(
+        "sequenceDiagram\n  H->>S: step_one()\n  H->>S: step_two()",
+    );
+    let sf = check(&seq, "doc.md", &index, &dir);
+    assert!(!sf.is_empty(), "sequence should ground to `handle`");
+    assert!(sf.iter().all(|f| f.verdict == Verdict::Supported), "{sf:?}");
+
+    let _ = fs::remove_dir_all(&dir);
 }

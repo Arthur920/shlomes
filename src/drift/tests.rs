@@ -102,6 +102,8 @@ fn path_claims_bucket_to_their_module_or_path() {
         signature: None,
         doc: None,
         facts: Facts::default(),
+        calls: Vec::new(),
+        members: Vec::new(),
     };
     let index = CodeIndex {
         symbols: vec![sym],
@@ -144,6 +146,8 @@ fn behavioral_drift_flag_fires_when_ledger_hash_is_stale() {
             constants: vec!["3".into()],
             ..Default::default()
         },
+        calls: Vec::new(),
+        members: Vec::new(),
     };
     let current_hash = facts::facts_hash(&sym.facts);
     assert_ne!(current_hash, 0);
@@ -187,6 +191,19 @@ fn behavioral_drift_flag_fires_when_ledger_hash_is_stale() {
         "{:?}",
         out.findings
     );
+}
+
+#[test]
+fn coverage_undocumented_gap_lowers_its_module_score() {
+    // A4 score integration: an Undocumented coverage gap is a scored claim. One
+    // supported + one undocumented in module `m` => credit 1 / total 2.
+    let scored = vec![
+        (Verdict::Supported, vec!["m".to_string()]),
+        (Verdict::Undocumented, vec!["m".to_string()]),
+    ];
+    let s = compute_score(&scored, "");
+    assert!((s.repo - 0.5).abs() < 1e-9, "{}", s.repo);
+    assert!((s.per_module["m"] - 0.5).abs() < 1e-9);
 }
 
 #[test]

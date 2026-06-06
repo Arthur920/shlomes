@@ -1,6 +1,7 @@
 //! Per-file extraction: symbols via tree-sitter-tags, dependency edges via a
 //! small per-language import query.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
 
@@ -86,7 +87,7 @@ fn extract_symbols_and_refs(
             continue;
         }
         let qualified_name = format!("{module}::{name}");
-        let kind = map_kind(config.syntax_type_name(tag.syntax_type_id));
+        let mut kind = map_kind(config.syntax_type_name(tag.syntax_type_id));
         let start_row = tag.span.start.row;
         let decl_line = lines.get(start_row).map(|l| l.trim().to_string());
         let visibility = classify_visibility(language, decl_line.as_deref().unwrap_or(""), &name);
@@ -114,6 +115,17 @@ fn extract_symbols_and_refs(
             None => (span.clone(), facts::extract_signature_only(decl_line.clone())),
         };
 
+        // tree-sitter-tags collapses enums into the `class` tag kind, so detect
+        // them from the AST node and correct the kind. Enum variants are the
+        // ground truth for state-diagram grounding.
+        let members = match def_node {
+            Some(node) if is_enum_node(node.kind()) => {
+                kind = SymbolKind::Enum;
+                enum_variants(node, source, language)
+            }
+            _ => Vec::new(),
+        };
+
         symbols.push(Symbol {
             qualified_name,
             name,
@@ -125,7 +137,25 @@ fn extract_symbols_and_refs(
             signature: decl_line,
             doc: tag.docs.clone(),
             facts: fact_data,
+            calls: Vec::new(),
+            members,
         });
+    }
+
+    // Ordered call list per definition: walk reference sites in source order and
+    // attribute each to its innermost enclosing definition. Preserves order and
+    // repetition (unlike the deduped global `ref_edges`) for sequence alignment.
+    ref_sites.sort_by_key(|(_, pos)| *pos);
+    let mut calls_by_def: HashMap<&str, Vec<String>> = HashMap::new();
+    for (name, pos) in &ref_sites {
+        if let Some(q) = enclosing(&defs, *pos) {
+            calls_by_def.entry(q).or_default().push(name.clone());
+        }
+    }
+    for s in &mut symbols {
+        if let Some(c) = calls_by_def.get(s.qualified_name.as_str()) {
+            s.calls = c.clone();
+        }
     }
 
     let refs = ref_sites
@@ -137,6 +167,45 @@ fn extract_symbols_and_refs(
         .collect();
 
     (symbols, refs)
+}
+
+/// Whether an AST node kind denotes an enum definition (Rust `enum_item`,
+/// Java/TS `enum_declaration`). Python enums are class-based and not detected.
+fn is_enum_node(kind: &str) -> bool {
+    matches!(kind, "enum_item" | "enum_declaration")
+}
+
+/// Variant names of an enum definition node. Per-language variant node kinds;
+/// languages whose enum shape we don't model (e.g. Python's class-based enums)
+/// yield nothing, so state-diagram grounding simply no-ops for them.
+fn enum_variants(node: tree_sitter::Node, source: &[u8], lang: Language) -> Vec<String> {
+    let kinds: &[&str] = match lang {
+        Language::Rust => &["enum_variant"],
+        Language::Java => &["enum_constant"],
+        _ => &[],
+    };
+    if kinds.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    collect_variants(node, source, kinds, &mut out);
+    out
+}
+
+fn collect_variants(node: tree_sitter::Node, source: &[u8], kinds: &[&str], out: &mut Vec<String>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if kinds.contains(&child.kind()) {
+            if let Some(name) = child
+                .child_by_field_name("name")
+                .and_then(|n| n.utf8_text(source).ok())
+            {
+                out.push(name.to_string());
+            }
+        } else {
+            collect_variants(child, source, kinds, out);
+        }
+    }
 }
 
 /// The innermost definition whose byte range contains `pos`. Among containing
@@ -316,6 +385,24 @@ mod tests {
         let src = b"fn foo() {\n    foo();\n}\n";
         let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
         assert!(has_ref(&refs, "m::foo", "foo"));
+    }
+
+    #[test]
+    fn calls_are_captured_in_source_order() {
+        // foo's body calls a, then (inside an if) b, then c -> ordered [a, b, c].
+        let src = b"fn a() {}\nfn b() {}\nfn c() {}\n\
+                    fn foo(x: bool) {\n    a();\n    if x { b(); }\n    c();\n}\n";
+        let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
+        let foo = syms.iter().find(|s| s.name == "foo").unwrap();
+        assert_eq!(foo.calls, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn enum_variants_are_extracted_as_members() {
+        let src = b"pub enum State {\n    Idle,\n    Running,\n    Done,\n}\n";
+        let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
+        let en = syms.iter().find(|s| s.name == "State").unwrap();
+        assert_eq!(en.members, vec!["Idle", "Running", "Done"]);
     }
 
     #[test]

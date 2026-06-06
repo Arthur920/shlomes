@@ -7,6 +7,7 @@ mod extract;
 pub mod facts;
 pub mod lang;
 mod resolve;
+pub mod schema;
 pub mod symbol;
 
 use std::collections::{HashMap, HashSet};
@@ -181,6 +182,8 @@ mod tests {
             signature: None,
             doc: None,
             facts: Facts::default(),
+            calls: Vec::new(),
+            members: Vec::new(),
         }
     }
 

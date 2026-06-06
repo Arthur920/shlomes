@@ -166,7 +166,7 @@ mod tests {
     use super::*;
     use tree_sitter::Parser;
 
-    fn root_fn<'t>(tree: &'t tree_sitter::Tree, src: &[u8]) -> Node<'t> {
+    fn root_fn<'t>(tree: &'t tree_sitter::Tree, _src: &[u8]) -> Node<'t> {
         // The first function-ish definition under the root.
         let root = tree.root_node();
         let mut cursor = root.walk();

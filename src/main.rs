@@ -151,7 +151,7 @@ fn run_check(root: &Path, opts: &drift::Options) -> drift::Outcome {
             manifests.project_bins(),
         ));
         findings.extend(entrypoints::check(&text, &rel, &grounding));
-        findings.extend(diagram::check(&text, &rel, &index));
+        findings.extend(diagram::check(&text, &rel, &index, root));
         arch_rules.extend(rules::extract_prose_rules(&text, &rel));
     }
     findings.extend(rules::check(&arch_rules, &index, root));
@@ -167,6 +167,10 @@ fn run_check(root: &Path, opts: &drift::Options) -> drift::Outcome {
             findings.extend(diagram::check_dot_file(&text, &rel, &index));
         }
     }
+
+    // Code -> doc coverage gaps: undocumented public surface, anchored to its
+    // symbol so it scores as its own dimension of the alignment score.
+    findings.extend(coverage::gaps(&index, root));
 
     // Layer 0: git-history staleness prior, then the drift pipeline (lineage,
     // carry-forward, fact-hash drift flag, alignment score).

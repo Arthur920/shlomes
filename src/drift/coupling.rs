@@ -9,7 +9,7 @@
 //! [`COCHANGE_MIN`] times *and* the code must have changed at least
 //! [`DRIFT_MIN`] times since the doc's last edit before we say anything.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use crate::claim::Provenance;
@@ -108,6 +108,33 @@ fn analyze(history: &[Vec<String>]) -> Vec<StaleDoc> {
             .then_with(|| a.code.cmp(&b.code))
     });
     out
+}
+
+/// Code files that have **never** co-changed with any doc across `history` — the
+/// "no doc has ever tracked this code" signal for net-new coverage gaps
+/// (`coverage-gaps.md` §4). Conservative: any commit touching both a doc and a
+/// code file marks *all* its code files tracked, so we under-flag rather than
+/// over-flag. Empty when git history is unavailable.
+pub fn code_without_codoc(history: &[Vec<String>]) -> HashSet<String> {
+    let mut all_code: HashSet<&str> = HashSet::new();
+    let mut tracked: HashSet<&str> = HashSet::new();
+    for files in history {
+        let has_doc = files.iter().any(|f| is_doc(f));
+        for f in files {
+            if is_doc(f) {
+                continue;
+            }
+            all_code.insert(f.as_str());
+            if has_doc {
+                tracked.insert(f.as_str());
+            }
+        }
+    }
+    all_code
+        .into_iter()
+        .filter(|f| !tracked.contains(f))
+        .map(str::to_string)
+        .collect()
 }
 
 fn is_doc(path: &str) -> bool {

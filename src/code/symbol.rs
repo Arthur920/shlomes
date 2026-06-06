@@ -98,6 +98,17 @@ pub struct Symbol {
     /// leading-comment documentation captured by the tags query, if any.
     pub doc: Option<String>,
     pub facts: Facts,
+    /// Callee names this definition references, in **source order** (control flow
+    /// flattened, innermost-attributed). The ordered substrate sequence-diagram
+    /// alignment compares against (`docs/diagram-coherence.md`, "Ordered
+    /// diagrams"); unlike `ref_edges` it preserves order and repetition.
+    #[serde(default)]
+    pub calls: Vec<String>,
+    /// For an `Enum`, its variant names — the ground truth state-diagram grounding
+    /// checks against. Empty for non-enums (and for languages whose enum-variant
+    /// shape we don't extract yet).
+    #[serde(default)]
+    pub members: Vec<String>,
 }
 
 /// A module-level dependency, derived from import/use statements.

@@ -8,9 +8,14 @@
 //! real modules with [`crate::rules::matches`] / [`crate::rules::grounded`] so we
 //! under-report rather than emit false positives.
 
+mod align;
+mod class;
 mod dot;
+mod er;
 mod mermaid;
 mod plantuml;
+mod sequence;
+mod state;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -156,14 +161,24 @@ fn sources(markdown: &str) -> Vec<Source> {
     out
 }
 
-/// Diagram-coherence findings for one markdown document.
-pub fn check(markdown: &str, doc_path: &str, index: &CodeIndex) -> Vec<Finding> {
+/// Diagram-coherence findings for one markdown document. `root` is the repo root
+/// (needed only to extract the SQL schema for ER diagrams).
+pub fn check(markdown: &str, doc_path: &str, index: &CodeIndex, root: &Path) -> Vec<Finding> {
     let modules = index.module_set();
     let mut out = Vec::new();
     for src in sources(markdown) {
         let origin = format!("{doc_path}:{}", src.line);
         if let Some(d) = parse(src.format, &src.body, &origin) {
             out.extend(diff(&d, index, &modules));
+        } else if let Some(seq) = sequence::parse(src.format, &src.body, &origin) {
+            // Ordered diagrams are aligned, not set-diffed.
+            out.extend(align::check(&seq, index));
+        } else {
+            // Symbol/schema-grounded kinds. Each returns empty unless the body is
+            // its kind, so this stays a clean fall-through.
+            out.extend(class::check(src.format, &src.body, &origin, index));
+            out.extend(state::check(src.format, &src.body, &origin, index));
+            out.extend(er::check(src.format, &src.body, &origin, root));
         }
     }
     out
