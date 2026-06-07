@@ -108,12 +108,10 @@ enum Format {
 pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            name != ".git" && name != ".shlomes"
-        })
+        .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
+        .filter(crate::code::lang::within_size_limit)
         .map(|e| e.into_path())
         .filter(|p| {
             matches!(
@@ -131,6 +129,10 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     let manifests = commands::Manifests::load(root);
     let code_tokens = config::code_tokens(root);
     let grounding = entrypoints::Grounding::from_index(&index);
+    // One git-history fetch shared by every history-mining pass (coverage risk
+    // ranking + the coupling staleness prior), rather than fetching + parsing
+    // the same 1000 commits twice.
+    let history = git::file_change_history(root, drift::coupling::MAX_COMMITS);
 
     // Architecture rules: prose-sourced, accumulated per doc, then verified once
     // (the symbol scan walks the whole repo).
@@ -176,7 +178,7 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
 
     // Code -> doc coverage gaps: undocumented public surface, anchored to its
     // symbol so it scores as its own dimension of the alignment score.
-    findings.extend(coverage::gaps(&index, root));
+    findings.extend(coverage::gaps(&index, root, &history));
 
     // Layer 3: behavioural prose claims the deterministic layers can't reach.
     // Layer 2 retrieves the evidence; the NLI judge renders the verdict. Gated
@@ -204,7 +206,7 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
 
     // Layer 0: git-history staleness prior, then the drift pipeline (lineage,
     // carry-forward, fact-hash drift flag, alignment score).
-    findings.extend(drift::coupling::check(root));
+    findings.extend(drift::coupling::check(&history));
     drift::run(findings, &index, root, opts)
 }
 

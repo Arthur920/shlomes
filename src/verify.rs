@@ -54,7 +54,7 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path) -> Vec<Finding> {
 fn tree_contains(root: &Path, suffix: &str) -> bool {
     WalkDir::new(root)
         .into_iter()
-        .filter_entry(|e| e.file_name() != ".git")
+        .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
         .filter_map(|e| e.ok())
         .any(|e| e.path().to_string_lossy().ends_with(suffix))
 }

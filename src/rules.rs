@@ -95,6 +95,17 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
 /// violations.
 pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<Finding> {
     let modules = index.module_set();
+    // Read every source file once, up front — but only if some forbid-symbol
+    // rule actually needs the textual scan. Otherwise N such rules would each
+    // re-walk and re-read the whole repo.
+    let sources = if rules
+        .iter()
+        .any(|r| matches!(r.rule, Rule::ForbidSymbol { .. }))
+    {
+        read_sources(repo_root)
+    } else {
+        Vec::new()
+    };
     let mut findings = Vec::new();
     for sr in rules {
         let before = findings.len();
@@ -112,7 +123,7 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
                 // clean rule is anchored to them so adding the symbol in any of
                 // them re-opens the claim (precise lineage, fixing the old empty
                 // provenance that could never carry forward).
-                let scanned = check_forbid_symbol(sr, symbol, except, index, repo_root, &mut findings);
+                let scanned = check_forbid_symbol(sr, symbol, except, index, &sources, &mut findings);
                 if findings.len() == before && !scanned.is_empty() {
                     findings.push(Finding::supported(
                         format!("forbids `{symbol}`"),
@@ -239,12 +250,27 @@ fn check_layer(
 /// scan of the resolved `ref_edges` for indirect/re-exported references the text
 /// scan can't see. The ref pass is skipped on ambiguous (multi-target) symbols
 /// to keep zero false positives, and skips modules the text pass already flagged.
+/// Read every in-budget source file once: its module path and full text. Shared
+/// across all forbid-symbol rules so the repo is walked + read a single time per
+/// `check` run rather than once per rule. Files that fail to read (non-UTF-8,
+/// permissions) are dropped — they can't be textually scanned anyway.
+fn read_sources(repo_root: &Path) -> Vec<(String, String)> {
+    lang::code_files(repo_root)
+        .into_iter()
+        .filter_map(|file| {
+            let module = lang::module_path(&file, repo_root);
+            let text = std::fs::read_to_string(&file).ok()?;
+            Some((module, text))
+        })
+        .collect()
+}
+
 fn check_forbid_symbol(
     sr: &SourcedRule,
     symbol: &str,
     except: &[String],
     index: &CodeIndex,
-    repo_root: &Path,
+    sources: &[(String, String)],
     out: &mut Vec<Finding>,
 ) -> Vec<String> {
     let is_excepted = |module: &str| except.iter().any(|e| matches(module, e));
@@ -252,15 +278,11 @@ fn check_forbid_symbol(
     let mut scanned = Vec::new();
     let mut text_flagged: HashSet<String> = HashSet::new();
 
-    for file in lang::code_files(repo_root) {
-        let module = lang::module_path(&file, repo_root);
-        if is_excepted(&module) {
+    for (module, text) in sources {
+        if is_excepted(module) {
             continue;
         }
         scanned.push(module.clone());
-        let Ok(text) = std::fs::read_to_string(&file) else {
-            continue;
-        };
         for (i, line) in text.lines().enumerate() {
             if matcher.is_match(line) {
                 let at = format!("{module}:{}", i + 1);

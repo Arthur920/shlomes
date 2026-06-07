@@ -127,10 +127,21 @@ fn resolve_module_edges(symbols: &[Symbol], edges: &[DepEdge]) -> Vec<DepEdge> {
     out
 }
 
+/// A name defined more than this many times is a common identifier (`new`,
+/// `get`, `build`, `next`): name-based resolution would fan every reference out
+/// to all of them, an `O(refs × defs)` blow-up that produced hundreds of
+/// millions of edges (and OOM) on large repos. Such names carry no signal, so
+/// we skip resolving them rather than explode.
+const MAX_DEFS_PER_NAME: usize = 32;
+
 /// Resolve raw references (name + enclosing symbol) into symbol-level edges.
-/// A reference name is matched to *every* same-named definition
-/// (over-approximate — never under-counts callers); self-edges and duplicate
-/// `(from, to)` pairs are dropped.
+/// A reference name is matched to every same-named definition (over-approximate
+/// — never under-counts callers), except names with more than
+/// [`MAX_DEFS_PER_NAME`] definitions, which are dropped as noise. Self-edges and
+/// duplicate `(from, to)` pairs are dropped.
+///
+/// Dedup is done over interned `u32` ids rather than cloned `String` pairs, so
+/// the `seen` set costs 8 bytes per pair instead of two heap allocations.
 fn resolve_refs(symbols: &[Symbol], raw_refs: Vec<RawRef>) -> Vec<RefEdge> {
     let mut by_name: HashMap<&str, Vec<&str>> = HashMap::new();
     for s in symbols {
@@ -140,17 +151,33 @@ fn resolve_refs(symbols: &[Symbol], raw_refs: Vec<RawRef>) -> Vec<RefEdge> {
             .push(s.qualified_name.as_str());
     }
 
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    // Intern qualified names / module paths to small ids. One allocation per
+    // distinct endpoint (linear in symbols), versus two per emitted pair before.
+    let mut ids: HashMap<String, u32> = HashMap::new();
+    let mut id_of = |s: &str| -> u32 {
+        if let Some(&i) = ids.get(s) {
+            return i;
+        }
+        let i = ids.len() as u32;
+        ids.insert(s.to_string(), i);
+        i
+    };
+
+    let mut seen: HashSet<(u32, u32)> = HashSet::new();
     let mut edges = Vec::new();
     for r in &raw_refs {
         let Some(targets) = by_name.get(r.name.as_str()) else {
             continue;
         };
+        if targets.len() > MAX_DEFS_PER_NAME {
+            continue;
+        }
+        let from_id = id_of(&r.from);
         for &to in targets {
             if to == r.from {
                 continue;
             }
-            if seen.insert((r.from.clone(), to.to_string())) {
+            if seen.insert((from_id, id_of(to))) {
                 edges.push(RefEdge {
                     from_symbol: r.from.clone(),
                     to_symbol: to.to_string(),

@@ -188,10 +188,7 @@ pub fn check(markdown: &str, doc_path: &str, index: &CodeIndex, root: &Path) -> 
 pub fn collect_dot_files(root: &Path) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            name != ".git" && name != ".shlomes"
-        })
+        .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())

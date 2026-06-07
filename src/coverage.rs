@@ -31,9 +31,6 @@ use crate::drift::coupling;
 use crate::findings::{Finding, Verdict};
 use crate::git;
 
-/// Commits of history to mine for churn + co-change (newest first).
-const MAX_COMMITS: usize = 1000;
-
 /// Identifier-like tokens (len ≥ 2). Underscores are part of a token, so a name
 /// like `check_paths` matches as a whole; runs over the whole doc, so prose and
 /// `backtick` spans are both covered.
@@ -46,7 +43,8 @@ fn ident_re() -> &'static Regex {
 /// subcommand path — builds its own index).
 pub fn run(repo_root: &Path) -> Vec<Finding> {
     let index = CodeIndex::build(repo_root);
-    gaps(&index, repo_root)
+    let history = git::file_change_history(repo_root, coupling::MAX_COMMITS);
+    gaps(&index, repo_root, &history)
 }
 
 /// Coverage gaps over an already-built index. The `check` pipeline calls this so
@@ -54,9 +52,9 @@ pub fn run(repo_root: &Path) -> Vec<Finding> {
 /// (`coverage-gaps.md` "Score integration"): each `Undocumented` gap is a claim
 /// anchored to its symbol, so it lowers that module's score and trips the
 /// regression gate, symmetric with a broken doc→code claim.
-pub fn gaps(index: &CodeIndex, repo_root: &Path) -> Vec<Finding> {
+pub fn gaps(index: &CodeIndex, repo_root: &Path, history: &[Vec<String>]) -> Vec<Finding> {
     let terms = build_doc_terms(repo_root);
-    let risk = RiskSignals::from_history(&git::file_change_history(repo_root, MAX_COMMITS));
+    let risk = RiskSignals::from_history(history);
     find_gaps(index, &terms, &risk)
 }
 

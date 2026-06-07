@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::Language as TsLanguage;
 use tree_sitter_tags::TagsConfiguration;
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
 /// Source languages the extractor understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,8 +24,49 @@ pub const CODE_EXTS: &[&str] = &[
     "cc", "cs", "php", "swift", "kt", "scala", "sh", "toml", "yaml", "yml",
 ];
 
-/// Directories never worth walking.
-const SKIP_DIRS: &[&str] = &[".git", "target", ".shlomes", "node_modules", ".venv"];
+/// Directories never worth walking — vendored deps, build output, VCS, our own
+/// cache. Shared by every walker (docs, diagrams, schema, code) so the whole
+/// tool ignores the same junk. Build-output dirs (`dist`, `build`, `.next`, …)
+/// matter especially: they hold minified bundles and generated blobs that carry
+/// no hand-written symbols but cost the most to parse.
+pub const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    ".shlomes",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    "vendor",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".gradle",
+    ".cache",
+];
+
+/// Files larger than this are skipped wholesale. Minified bundles and generated
+/// blobs blow up the tree-sitter parser (and our utf8/line copies) while
+/// yielding nothing useful; 2 MiB clears essentially all hand-written source.
+pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// True if a directory entry's file name is one we never descend into. Pass the
+/// `file_name()` of a `walkdir` entry; usable directly in `filter_entry`.
+pub fn is_skip_dir(name: &str) -> bool {
+    SKIP_DIRS.contains(&name)
+}
+
+/// True if a walkdir entry is within the size budget (or its size is unknown).
+/// Shared by every file walker so one oversized blob can't OOM any pass.
+pub fn within_size_limit(entry: &DirEntry) -> bool {
+    entry
+        .metadata()
+        .map(|m| m.len() <= MAX_FILE_BYTES)
+        .unwrap_or(true)
+}
 
 impl Language {
     /// Map a file extension to a language the extractor can parse, if any.
@@ -103,12 +144,10 @@ pub fn is_code(p: &Path) -> bool {
 pub fn code_files(repo_root: &Path) -> Vec<PathBuf> {
     WalkDir::new(repo_root)
         .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            !SKIP_DIRS.contains(&name.as_ref())
-        })
+        .filter_entry(|e| !is_skip_dir(&e.file_name().to_string_lossy()))
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
+        .filter(within_size_limit)
         .map(|e| e.into_path())
         .filter(|p| is_code(p))
         .collect()

@@ -54,10 +54,7 @@ impl Schema {
 fn sql_files(root: &Path) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            name != ".git" && name != ".shlomes" && name != "target"
-        })
+        .filter_entry(|e| !super::lang::is_skip_dir(&e.file_name().to_string_lossy()))
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())

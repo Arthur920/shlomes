@@ -10,14 +10,14 @@
 //! [`DRIFT_MIN`] times since the doc's last edit before we say anything.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
 
 use crate::claim::Provenance;
 use crate::findings::{Finding, Verdict};
-use crate::git;
 
-/// Commits to mine from history (newest first).
-const MAX_COMMITS: usize = 1000;
+/// Commits to mine from history (newest first). The single source of truth for
+/// how deep every history-mining pass (coupling + coverage risk) reads, so the
+/// shared fetch in `run_check` covers both.
+pub const MAX_COMMITS: usize = 1000;
 /// Minimum historical co-changes before a pair is considered coupled.
 const COCHANGE_MIN: usize = 2;
 /// Minimum code churn since the doc's last edit to call the doc stale.
@@ -33,11 +33,11 @@ pub struct StaleDoc {
     pub churn_after: usize,
 }
 
-/// Staleness-prior findings for the repo, mined from git history. Empty when git
-/// is unavailable or history is too thin to be meaningful.
-pub fn check(root: &Path) -> Vec<Finding> {
-    let history = git::file_change_history(root, MAX_COMMITS);
-    analyze(&history)
+/// Staleness-prior findings for the repo, mined from a pre-fetched git history
+/// (newest-first per-commit file lists). Empty when git is unavailable or
+/// history is too thin to be meaningful.
+pub fn check(history: &[Vec<String>]) -> Vec<Finding> {
+    analyze(history)
         .into_iter()
         .map(|s| {
             Finding::problem(
