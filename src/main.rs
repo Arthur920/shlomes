@@ -34,12 +34,26 @@ use crate::findings::Finding;
 #[command(
     name = "shlomes",
     version,
-    about = "Check CLAUDE.md, project docs, and code against each other for coherence drift."
+    about = "Check CLAUDE.md, project docs, and code against each other for coherence drift.",
+    after_help = EXAMPLES
 )]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
+
+/// Worked examples appended to `shlomes --help`.
+const EXAMPLES: &str = "\
+Examples:
+  shlomes check                  full repo, deterministic (layer 1)
+  shlomes check --diff main      only re-check what changed vs main
+  shlomes check --format json    machine-readable findings (exits non-zero on drift)
+  shlomes check --write-ledger   set the CI alignment baseline on the base branch
+  shlomes index                  print code symbols + module/reference edges
+  shlomes coverage               public code surface no doc describes
+
+Layers 2-3 (retrieval + NLI judge) need the `ml` build; see `shlomes check --help`.
+Run `shlomes <command> --help` for per-command options.";
 
 #[derive(Subcommand)]
 enum Commands {
