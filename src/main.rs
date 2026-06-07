@@ -133,6 +133,9 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     // ranking + the coupling staleness prior), rather than fetching + parsing
     // the same 1000 commits twice.
     let history = git::file_change_history(root, drift::coupling::MAX_COMMITS);
+    // The repo's path list, walked once, so each doc's path claims match in
+    // memory instead of re-walking the whole tree per claim.
+    let repo_files = verify::repo_paths(root);
 
     // Architecture rules: prose-sourced, accumulated per doc, then verified once
     // (the symbol scan walks the whole repo).
@@ -150,7 +153,7 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
             .to_string_lossy()
             .to_string();
         let claims = extract::extract_path_claims(&text, &rel);
-        findings.extend(verify::check_paths(&claims, root));
+        findings.extend(verify::check_paths(&claims, root, &repo_files));
         findings.extend(commands::check(&text, &rel, &manifests));
         findings.extend(config::check(
             &text,
