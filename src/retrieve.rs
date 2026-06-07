@@ -24,10 +24,23 @@ use crate::claim::fnv1a;
 use crate::code::lang;
 use crate::code::CodeIndex;
 
-/// HuggingFace repo + the int8-quantized ONNX (162 MB vs the 642 MB fp32 that
-/// fastembed's built-in `JinaEmbeddingsV2BaseCode` variant would download).
-const MODEL_REPO: &str = "jinaai/jina-embeddings-v2-base-code";
-const QUANTIZED_ONNX: &str = "onnx/model_quantized.onnx";
+/// Default HuggingFace repo + the int8-quantized ONNX (162 MB vs the 642 MB fp32
+/// that fastembed's built-in `JinaEmbeddingsV2BaseCode` variant would download).
+/// Both are overridable via `SHLOMES_EMBED_REPO` / `SHLOMES_EMBED_ONNX` so the
+/// embedding model can be swapped (e.g. for a smaller, faster one) without a
+/// rebuild; the on-disk cache is tagged with the repo so a swap invalidates it.
+/// A swapped model must expose the same tokenizer file layout and use mean
+/// pooling (same as jina v2).
+const DEFAULT_MODEL_REPO: &str = "jinaai/jina-embeddings-v2-base-code";
+const DEFAULT_ONNX: &str = "onnx/model_quantized.onnx";
+
+fn model_repo() -> String {
+    std::env::var("SHLOMES_EMBED_REPO").unwrap_or_else(|_| DEFAULT_MODEL_REPO.to_string())
+}
+
+fn model_onnx() -> String {
+    std::env::var("SHLOMES_EMBED_ONNX").unwrap_or_else(|_| DEFAULT_ONNX.to_string())
+}
 
 /// Fallback line-window chunking (files with no extractable symbols).
 const CHUNK_LINES: usize = 40;
@@ -132,14 +145,21 @@ fn collect_chunks(repo_root: &Path, index: &CodeIndex) -> Vec<Chunk> {
 
     let mut chunks = Vec::new();
     for p in lang::code_files(repo_root) {
-        let Ok(content) = std::fs::read_to_string(&p) else {
-            continue;
-        };
         let rel = p
             .strip_prefix(repo_root)
             .unwrap_or(&p)
             .to_string_lossy()
             .to_string();
+        // Docs describe the library's own API, so tests/benchmarks/examples are
+        // noise as *evidence* — and on a real repo they are ~half the corpus, the
+        // dominant embedding cost. Drop them from the retrieval set (the symbol
+        // index still sees them). Disable with `SHLOMES_EMBED_INCLUDE_TESTS=1`.
+        if !include_tests() && is_non_library(&rel) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&p) else {
+            continue;
+        };
         let lines: Vec<&str> = content.lines().collect();
         match spans_by_file.remove(rel.as_str()) {
             Some(spans) if !spans.is_empty() => {
@@ -149,6 +169,36 @@ fn collect_chunks(repo_root: &Path, index: &CodeIndex) -> Vec<Chunk> {
         }
     }
     chunks
+}
+
+fn include_tests() -> bool {
+    std::env::var_os("SHLOMES_EMBED_INCLUDE_TESTS").is_some()
+}
+
+/// Heuristic: is this a test / benchmark / example file (not library code the
+/// docs would describe)? Matched on path segments and filename conventions
+/// across the common ecosystems (pytest, go, rust, js).
+fn is_non_library(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    let seg = |s: &str| {
+        lower.starts_with(&format!("{s}/")) || lower.contains(&format!("/{s}/"))
+    };
+    if ["tests", "test", "testing", "benchmarks", "benchmark", "bench", "examples", "example", "e2e", "fixtures", "__tests__"]
+        .iter()
+        .any(|d| seg(d))
+    {
+        return true;
+    }
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    name.starts_with("test_")
+        || name.starts_with("conftest")
+        || name.ends_with("_test.py")
+        || name.ends_with("_test.go")
+        || name.ends_with("_test.rs")
+        || name.ends_with(".test.ts")
+        || name.ends_with(".test.js")
+        || name.ends_with(".spec.ts")
+        || name.ends_with(".spec.js")
 }
 
 // ---- embedding cache ------------------------------------------------------
@@ -175,9 +225,9 @@ impl EmbedCache {
             .and_then(|b| serde_json::from_slice(&b).ok());
         match cache {
             // A cache from a different model lives in a different vector space.
-            Some(c) if c.model == MODEL_REPO => c,
+            Some(c) if c.model == model_repo() => c,
             _ => EmbedCache {
-                model: MODEL_REPO.to_string(),
+                model: model_repo(),
                 ..Default::default()
             },
         }
@@ -234,10 +284,10 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// v2 uses mean pooling; quantization stays `None` because the int8 is baked
 /// into the graph, not applied by fastembed.
 fn new_model() -> Result<TextEmbedding> {
-    let repo = Api::new()?.model(MODEL_REPO.to_string());
+    let repo = Api::new()?.model(model_repo());
     let read = |path: &str| -> Result<Vec<u8>> { Ok(std::fs::read(repo.get(path)?)?) };
 
-    let onnx = read(QUANTIZED_ONNX)?;
+    let onnx = read(&model_onnx())?;
     let tokenizer_files = TokenizerFiles {
         tokenizer_file: read("tokenizer.json")?,
         config_file: read("config.json")?,
@@ -246,7 +296,35 @@ fn new_model() -> Result<TextEmbedding> {
     };
 
     let model = UserDefinedEmbeddingModel::new(onnx, tokenizer_files).with_pooling(Pooling::Mean);
-    TextEmbedding::try_new_from_user_defined(model, InitOptionsUserDefined::new())
+    // Cap the embedded sequence length. fastembed pads each batch to its longest
+    // member and runs batches sequentially, so on a CPU the per-run cost scales
+    // with this length. Code chunks carry their retrieval signal (signature +
+    // opening lines) well within ~128 tokens; the default 512 quadruples the work
+    // for no recall gain. Overridable via `SHLOMES_EMBED_MAX_TOKENS`.
+    let max_tokens = std::env::var("SHLOMES_EMBED_MAX_TOKENS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(128);
+    let opts = InitOptionsUserDefined::new()
+        .with_max_length(max_tokens)
+        // fastembed runs batches sequentially, so ONNX intra-op threads are the
+        // only parallelism for embedding. Default leaves cores idle (~4/10 here);
+        // pin it to all available cores. Overridable via `SHLOMES_ORT_THREADS`.
+        .with_intra_threads(ort_threads());
+    TextEmbedding::try_new_from_user_defined(model, opts)
+}
+
+/// ONNX intra-op thread count: `SHLOMES_ORT_THREADS` if set, else every core.
+pub(crate) fn ort_threads() -> usize {
+    std::env::var("SHLOMES_ORT_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        })
 }
 
 /// Embed `texts`, using the cache for hits and the model for misses. The model
@@ -280,18 +358,30 @@ fn embed_cached(texts: &[String], cache: &mut EmbedCache) -> Result<Vec<Vec<f32>
 /// Build the code index, chunk it, then return the top-`k` chunks for each query
 /// by cosine similarity. If a reranker is configured ([`crate::rerank`]),
 /// over-fetch by cosine and rerank down to `k`. Result is parallel to `queries`.
-pub fn retrieve(repo_root: &Path, queries: &[String], k: usize) -> Result<Vec<Vec<Hit>>> {
-    let index = CodeIndex::build(repo_root);
-    let chunks = collect_chunks(repo_root, &index);
+pub fn retrieve(
+    repo_root: &Path,
+    index: &CodeIndex,
+    queries: &[String],
+    k: usize,
+) -> Result<Vec<Vec<Hit>>> {
+    let t = std::time::Instant::now();
+    let chunks = collect_chunks(repo_root, index);
+    crate::judge::timing(format!("  retrieve: chunk ({} chunks)", chunks.len()), t);
     if chunks.is_empty() {
         return Ok(queries.iter().map(|_| Vec::new()).collect());
     }
 
+    let t = std::time::Instant::now();
     let mut cache = EmbedCache::load(repo_root);
+    crate::judge::timing("  retrieve: cache load", t);
     let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+    let t = std::time::Instant::now();
     let chunk_vecs = embed_cached(&chunk_texts, &mut cache)?;
+    crate::judge::timing("  retrieve: embed corpus", t);
     let query_vecs = embed_cached(queries, &mut cache)?;
+    let t = std::time::Instant::now();
     cache.save(repo_root);
+    crate::judge::timing("  retrieve: cache save", t);
 
     let mut reranker = crate::rerank::Reranker::from_env()?;
     // Over-fetch before reranking so the reranker can promote chunks cosine ranked
@@ -361,9 +451,32 @@ mod tests {
     }
 
     #[test]
+    fn non_library_files_detected() {
+        for p in [
+            "tests/test_main.py",
+            "src/foo/test_x.py",
+            "pkg/foo_test.go",
+            "benchmarks/run.py",
+            "docs/examples/demo.py",
+            "web/__tests__/a.test.ts",
+            "conftest.py",
+        ] {
+            assert!(is_non_library(p), "should be non-library: {p}");
+        }
+        for p in [
+            "src/main.rs",
+            "pydantic/main.py",
+            "lib/contest.py", // 'contest' must not match 'conftest'
+            "src/latest/mod.rs", // 'latest' must not match the 'test' segment
+        ] {
+            assert!(!is_non_library(p), "should be library: {p}");
+        }
+    }
+
+    #[test]
     fn cache_round_trips_by_content() {
         let mut c = EmbedCache {
-            model: MODEL_REPO.to_string(),
+            model: DEFAULT_MODEL_REPO.to_string(),
             ..Default::default()
         };
         assert!(c.get("hello").is_none());

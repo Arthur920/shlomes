@@ -122,7 +122,10 @@ impl Judge {
         let tok = repo.get("tokenizer.json")?;
         let cfg = repo.get("config.json")?;
 
-        let session = Session::builder()?.commit_from_file(onnx)?;
+        let session = Session::builder()?
+            .with_intra_threads(retrieve::ort_threads())
+            .map_err(|e| anyhow!("set intra threads: {e}"))?
+            .commit_from_file(onnx)?;
 
         let mut tokenizer =
             Tokenizer::from_file(tok).map_err(|e| anyhow!("load tokenizer: {e}"))?;
@@ -242,15 +245,20 @@ fn decide(best_entail: f32, best_contra: f32, threshold: f32) -> (Verdict, f32) 
 /// Emits `Supported` claims (ledgered, not reported) and `Contradicted` /
 /// `Unverifiable` problems, all tagged `layer = 3` and anchored to the evidence
 /// files so drift lineage can re-open them when that code changes.
-pub fn check(root: &Path, claims: &[ProseClaim], k: usize) -> Result<Vec<Finding>> {
+pub fn check(root: &Path, index: &CodeIndex, claims: &[ProseClaim], k: usize) -> Result<Vec<Finding>> {
     if claims.is_empty() {
         return Ok(Vec::new());
     }
 
     let texts: Vec<String> = claims.iter().map(|c| c.text.clone()).collect();
-    let retrieved = retrieve::retrieve(root, &texts, k)?;
+    let t = std::time::Instant::now();
+    let retrieved = retrieve::retrieve(root, index, &texts, k)?;
+    timing(format!("retrieve ({} claims)", claims.len()), t);
+    let t = std::time::Instant::now();
     let mut judge = Judge::load()?;
+    timing("judge model load", t);
 
+    let t = std::time::Instant::now();
     let mut findings = Vec::new();
     for (claim, hits) in claims.iter().zip(retrieved) {
         let evidence: Vec<String> = hits.iter().map(|h| h.text.clone()).collect();
@@ -285,7 +293,15 @@ pub fn check(root: &Path, claims: &[ProseClaim], k: usize) -> Result<Vec<Finding
         finding.layer = 3;
         findings.push(finding);
     }
+    timing(format!("judge {} claims", claims.len()), t);
     Ok(findings)
+}
+
+/// Print elapsed time for a phase when `SHLOMES_TIMING` is set; no-op otherwise.
+pub(crate) fn timing(label: impl AsRef<str>, since: std::time::Instant) {
+    if std::env::var_os("SHLOMES_TIMING").is_some() {
+        eprintln!("[timing] {}: {:.2}s", label.as_ref(), since.elapsed().as_secs_f32());
+    }
 }
 
 /// Pull candidate behavioural claims from doc prose: lines that reference code

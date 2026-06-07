@@ -81,6 +81,12 @@ enum Commands {
         /// Fail if the alignment score regressed below the committed baseline.
         #[arg(long)]
         fail_on_regression: bool,
+        /// Restrict doc-vs-code checks to these doc paths (repeatable; matched by
+        /// exact relative path or path suffix). Skips the repo-wide coverage and
+        /// history passes, so it is far cheaper — useful for checking a single
+        /// changed doc (and for keeping the Layer-3 judge to that doc's claims).
+        #[arg(long = "doc")]
+        docs: Vec<String>,
     },
     /// Extract and print the code index (symbols + dependency edges).
     Index {
@@ -121,6 +127,13 @@ enum Format {
 }
 
 pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
+    collect_docs_filtered(root, &[])
+}
+
+/// `collect_docs`, optionally restricted to the docs named in `filter` (matched
+/// by exact relative path or path suffix, e.g. `README.md` or `docs/usage.md`).
+/// An empty filter means "every doc" (the changelog exclusion still applies).
+pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
@@ -135,6 +148,13 @@ pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
             )
         })
         .filter(|p| !is_changelog_doc(p))
+        .filter(|p| {
+            if filter.is_empty() {
+                return true;
+            }
+            let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy();
+            filter.iter().any(|f| rel == f.as_str() || rel.ends_with(f.as_str()))
+        })
         .collect()
 }
 
@@ -171,8 +191,14 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
     })
 }
 
-fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
+fn run_check(root: &Path, opts: &drift::Options, layer: u8, doc_filter: &[String]) -> drift::Outcome {
     let _ = layer; // consulted only in `ml` builds for the Layer 3 judge.
+    // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
+    // the repo-wide coverage/history passes (which answer "what code is
+    // undocumented", a whole-repo question that a single-doc check doesn't ask).
+    // This is what makes a scoped run cheap: no 1000-commit history parse, no
+    // coverage ranking, and the Layer-3 judge only sees the target doc's claims.
+    let scoped = !doc_filter.is_empty();
     // Repo-wide grounding, built once and shared across every doc.
     let index = CodeIndex::build(root);
     // Manifests are resolved per doc from its nearest ancestor manifest (cached
@@ -182,9 +208,12 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     let code_tokens = config::code_tokens(root);
     let grounding = entrypoints::Grounding::from_index(&index);
     // One git-history fetch shared by every history-mining pass (coverage risk
-    // ranking + the coupling staleness prior), rather than fetching + parsing
-    // the same 1000 commits twice.
-    let history = git::file_change_history(root, drift::coupling::MAX_COMMITS);
+    // ranking + the coupling staleness prior). Skipped entirely when scoped.
+    let history = if scoped {
+        Vec::new()
+    } else {
+        git::file_change_history(root, drift::coupling::MAX_COMMITS)
+    };
     // The repo's path list, walked once, so each doc's path claims match in
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
@@ -194,7 +223,7 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     let mut arch_rules: Vec<rules::SourcedRule> = Vec::new();
 
     let mut findings = Vec::new();
-    for doc in collect_docs(root) {
+    for doc in collect_docs_filtered(root, doc_filter) {
         let text = match std::fs::read_to_string(&doc) {
             Ok(t) => t,
             Err(_) => continue,
@@ -224,20 +253,26 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     findings.extend(rules::check(&arch_rules, &index, root));
 
     // Standalone Graphviz files (`*.dot`/`*.gv`) live outside the markdown set.
-    for dot in diagram::collect_dot_files(root) {
-        if let Ok(text) = std::fs::read_to_string(&dot) {
-            let rel = dot
-                .strip_prefix(root)
-                .unwrap_or(&dot)
-                .to_string_lossy()
-                .to_string();
-            findings.extend(diagram::check_dot_file(&text, &rel, &index));
+    // They are a whole-repo pass, so a `--doc`-scoped run skips them.
+    if !scoped {
+        for dot in diagram::collect_dot_files(root) {
+            if let Ok(text) = std::fs::read_to_string(&dot) {
+                let rel = dot
+                    .strip_prefix(root)
+                    .unwrap_or(&dot)
+                    .to_string_lossy()
+                    .to_string();
+                findings.extend(diagram::check_dot_file(&text, &rel, &index));
+            }
         }
     }
 
     // Code -> doc coverage gaps: undocumented public surface, anchored to its
-    // symbol so it scores as its own dimension of the alignment score.
-    findings.extend(coverage::gaps(&index, root, &history));
+    // symbol so it scores as its own dimension of the alignment score. This is a
+    // whole-repo question, so a `--doc`-scoped run skips it.
+    if !scoped {
+        findings.extend(coverage::gaps(&index, root, &history));
+    }
 
     // Layer 3: behavioural prose claims the deterministic layers can't reach.
     // Layer 2 retrieves the evidence; the NLI judge renders the verdict. Gated
@@ -246,7 +281,7 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     #[cfg(feature = "ml")]
     if layer >= 3 {
         let mut claims = Vec::new();
-        for doc in collect_docs(root) {
+        for doc in collect_docs_filtered(root, doc_filter) {
             if let Ok(text) = std::fs::read_to_string(&doc) {
                 let rel = doc
                     .strip_prefix(root)
@@ -257,15 +292,18 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
             }
         }
         claims.truncate(judge::MAX_CLAIMS);
-        match judge::check(root, &claims, judge::EVIDENCE_K) {
+        match judge::check(root, &index, &claims, judge::EVIDENCE_K) {
             Ok(mut judged) => findings.append(&mut judged),
             Err(e) => eprintln!("note: layer 3 judge skipped ({e})"),
         }
     }
 
     // Layer 0: git-history staleness prior, then the drift pipeline (lineage,
-    // carry-forward, fact-hash drift flag, alignment score).
-    findings.extend(drift::coupling::check(&history));
+    // carry-forward, fact-hash drift flag, alignment score). The staleness prior
+    // needs the (skipped) history, so it only runs on a full, unscoped check.
+    if !scoped {
+        findings.extend(drift::coupling::check(&history));
+    }
     drift::run(findings, &index, root, opts)
 }
 
@@ -358,6 +396,7 @@ fn main() -> ExitCode {
             diff,
             write_ledger,
             fail_on_regression,
+            docs,
         } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
             #[cfg(not(feature = "ml"))]
@@ -373,7 +412,7 @@ fn main() -> ExitCode {
                 write_ledger,
                 fail_on_regression,
             };
-            let out = run_check(&root, &opts, layer);
+            let out = run_check(&root, &opts, layer, &docs);
             report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {
@@ -401,7 +440,8 @@ fn main() -> ExitCode {
         #[cfg(feature = "ml")]
         Commands::Retrieve { query, path, k } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
-            match retrieve::retrieve(&root, std::slice::from_ref(&query), k) {
+            let index = CodeIndex::build(&root);
+            match retrieve::retrieve(&root, &index, std::slice::from_ref(&query), k) {
                 Ok(per_query) => {
                     for hit in &per_query[0] {
                         println!("{:.3}  {}:{}", hit.score, hit.path, hit.start_line);
