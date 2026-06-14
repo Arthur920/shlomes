@@ -155,6 +155,16 @@ fn symbols_and_refs(
         });
     }
 
+    // tree-sitter-tags' JS/TS reference query captures call / `new` sites but not
+    // JSX element usage, so a component rendered only as `<LoginPage/>` looked
+    // like it had no callers (fan-in 0). Capture capitalized JSX element names as
+    // references too; lowercase names are intrinsic HTML elements, not symbols.
+    if matches!(language, Language::JavaScript | Language::Tsx) {
+        if let Some(node) = root {
+            collect_jsx_refs(node, source, &mut ref_sites);
+        }
+    }
+
     // Ordered call list per definition: walk reference sites in source order and
     // attribute each to its innermost enclosing definition. Preserves order and
     // repetition (unlike the deduped global `ref_edges`) for sequence alignment.
@@ -180,6 +190,30 @@ fn symbols_and_refs(
         .collect();
 
     (symbols, refs)
+}
+
+/// Recursively capture capitalized JSX element names (`<LoginPage/>`, `<Route>`)
+/// as reference sites. Component names are PascalCase; lowercase names are
+/// intrinsic HTML elements (`<div>`) and carry no symbol reference.
+fn collect_jsx_refs(node: Node, source: &[u8], out: &mut Vec<(String, usize)>) {
+    if matches!(
+        node.kind(),
+        "jsx_opening_element" | "jsx_self_closing_element"
+    ) {
+        if let Some(name) = node.child_by_field_name("name") {
+            if name.kind() == "identifier" {
+                if let Ok(text) = name.utf8_text(source) {
+                    if text.starts_with(|c: char| c.is_ascii_uppercase()) {
+                        out.push((text.to_string(), name.start_byte()));
+                    }
+                }
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_jsx_refs(child, source, out);
+    }
 }
 
 /// Whether an AST node kind denotes a first-class enum definition (Rust
@@ -435,6 +469,23 @@ mod tests {
         assert_eq!(vis_of(&syms, "bar"), Some(Visibility::Private));
         let edges = extract_edges(Language::Rust, src, "m");
         assert!(has_edge(&edges, "std::fmt"));
+    }
+
+    #[test]
+    fn jsx_element_usage_is_a_reference() {
+        // A component rendered only as `<LoginPage/>` must count as a caller, so
+        // its fan-in isn't falsely zero. Lowercase HTML tags are not references.
+        let src = b"function Routes() {\n  return <div><LoginPage /></div>;\n}\n";
+        let (_syms, refs) = extract_symbols_and_refs(Language::Tsx, src, "routes", "routes.tsx");
+        let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(
+            has_ref(&refs, "routes::Routes", "LoginPage"),
+            "JSX component usage not captured as a ref: {names:?}"
+        );
+        assert!(
+            !refs.iter().any(|r| r.name == "div"),
+            "lowercase HTML tag leaked as a ref"
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@
 //! [`retrieve`]: crate::retrieve
 //! [`judge`]: crate::judge
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use walkdir::WalkDir;
@@ -40,20 +40,51 @@ pub fn repo_paths(root: &Path) -> Vec<String> {
 /// claims cost nothing; the only thing removed versus the old code is the
 /// full-tree re-walk that ran once per claim.
 pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    let mut memo: HashMap<&str, bool> = HashMap::new();
+    // Existence per distinct token, memoized (one stat / suffix scan each).
+    let mut exists: HashMap<&str, bool> = HashMap::new();
     for c in claims {
-        let exists = *memo.entry(c.raw.as_str()).or_insert_with(|| {
+        exists.entry(c.raw.as_str()).or_insert_with(|| {
             repo_root.join(&c.raw).exists() || repo_files.iter().any(|p| p.ends_with(&c.raw))
         });
+    }
+
+    // Migration rows: when one doc line names several paths and at least one
+    // resolves, the unresolved siblings are the "before" side of an old → new
+    // mapping (e.g. a `| old | new |` table row); their absence is intentional.
+    let mut by_line: HashMap<(&str, usize), Vec<&PathClaim>> = HashMap::new();
+    for c in claims {
+        by_line
+            .entry((c.doc_path.as_str(), c.line))
+            .or_default()
+            .push(c);
+    }
+    let mut migrated: HashSet<(&str, usize, &str)> = HashSet::new();
+    for group in by_line.values() {
+        if group.len() >= 2 && group.iter().any(|c| exists[c.raw.as_str()]) {
+            for c in group {
+                if !exists[c.raw.as_str()] {
+                    migrated.insert((c.doc_path.as_str(), c.line, c.raw.as_str()));
+                }
+            }
+        }
+    }
+
+    let mut findings = Vec::new();
+    for c in claims {
+        let present = exists[c.raw.as_str()];
         let doc_ref = format!("{}:{}", c.doc_path, c.line);
         let prov = Provenance::path(c.raw.clone());
-        if exists {
+        if present {
             findings.push(Finding::supported(
                 format!("references `{}`", c.raw),
                 doc_ref,
                 prov,
             ));
+        } else if c.historical || migrated.contains(&(c.doc_path.as_str(), c.line, c.raw.as_str()))
+        {
+            // Named as deleted / renamed / replaced — its absence confirms the
+            // doc rather than contradicting it, so emit nothing (zero-FP).
+            continue;
         } else {
             findings.push(
                 Finding::problem(
@@ -114,5 +145,35 @@ mod tests {
         let claims = extract_path_claims("See `src/main.py`.", "README.md");
         let findings = check_paths(&claims, &dir, &repo_paths(&dir));
         assert!(findings.iter().all(|f| !f.verdict.is_reportable()));
+    }
+
+    #[test]
+    fn deleted_path_in_deletion_context_is_not_flagged() {
+        // A plan documenting a removal names a file that (correctly) does not
+        // exist — its absence confirms the doc, so no stale finding.
+        let dir = scratch_dir("deleted");
+        let md = "**Delete**\n\n- `src/old/handler.ts`\n\n`src/old/handler.ts` no longer exists.";
+        let claims = extract_path_claims(md, "PLAN.md");
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        assert!(
+            findings.iter().all(|f| !f.verdict.is_reportable()),
+            "deletion-context path was flagged: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn migration_row_old_path_is_not_flagged() {
+        // `| old | new |`: new exists, old doesn't — the old side is the
+        // migration source and must not be flagged stale.
+        let dir = scratch_dir("migration");
+        fs::create_dir_all(dir.join("src/common/query")).unwrap();
+        fs::write(dir.join("src/common/query/query-client.ts"), "//\n").unwrap();
+        let md = "| `src/lib/query-client.ts` | `src/common/query/query-client.ts` |";
+        let claims = extract_path_claims(md, "PLAN.md");
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        assert!(
+            findings.iter().all(|f| !f.verdict.is_reportable()),
+            "migration old-path was flagged: {findings:?}"
+        );
     }
 }
