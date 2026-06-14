@@ -129,9 +129,7 @@ Layer 1 (deterministic) builds with no extra features. Layers 2 (retrieval) and 
 - **Layer 3** (the NLI judge) is newer. The default model,
   [`code-doc-coherence-shlomes`](https://huggingface.co/Arthur920/code-doc-coherence-shlomes),
   is a `microsoft/unixcoder-base` fine-tune trained specifically for this
-  task — code-aware, so real code stays in-distribution as the premise (an
-  earlier text-NLI model did not, and produced overconfident false
-  contradictions). Treat its verdicts as advisory and review contradictions
+  task, code-aware, so real code stays in-distribution as the premise. Treat its verdicts as advisory and review contradictions
   before acting. The model is overridable via `SHLOMES_NLI_REPO` (a HF repo id
   or a local checkpoint directory).
 
