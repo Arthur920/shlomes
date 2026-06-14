@@ -121,3 +121,27 @@ cargo install --path . --features ml # install the `shlomes` binary (with ml)
 
 Layer 1 (deterministic) builds with no extra features. Layers 2 (retrieval) and 3
 (NLI judge) live behind the `ml` feature so the default build stays lean.
+
+## Status
+
+- **Layers 1–2** are the stable core and what most runs should rely on. Layer 1
+  is deterministic and tuned to under-report rather than false-alarm.
+- **Layer 3** (the NLI judge) is newer. The default model,
+  [`code-doc-coherence-shlomes`](https://huggingface.co/Arthur920/code-doc-coherence-shlomes),
+  is a `microsoft/unixcoder-base` fine-tune trained specifically for this
+  task — code-aware, so real code stays in-distribution as the premise (an
+  earlier text-NLI model did not, and produced overconfident false
+  contradictions). Treat its verdicts as advisory and review contradictions
+  before acting. The model is overridable via `SHLOMES_NLI_REPO` (a HF repo id
+  or a local checkpoint directory).
+
+## About this project
+
+shlomes is a personal project, and its development was **heavily AI-assisted** —
+most of the implementation was written with AI coding tools, with me directing
+the architecture, the layer design, the evaluation, and the call on what was good
+enough to keep. The custom Layer 3 model was likewise trained and evaluated as
+part of that loop. I'm flagging this plainly rather than dressing it up: the
+ideas and the judgment calls are mine, a large share of the code is not
+hand-typed, and the deterministic core is built to be auditable precisely because
+I don't expect anyone (including me) to take generated code on faith.
