@@ -70,7 +70,7 @@ enum Commands {
         format: Format,
         /// Max layer: 1 deterministic (recommended), 2 +retrieval, 3 +NLI judge.
         /// Layers 2-3 require the `ml` feature build. Layer 3 runs a code-aware NLI
-        /// cross-encoder (`code-doc-coherence-staleguard`, a UniXcoder fine-tune) over
+        /// cross-encoder (`staleguard`, a UniXcoder fine-tune) over
         /// the retrieved code evidence to render supported/contradicted verdicts.
         #[arg(long, default_value_t = 1)]
         layer: u8,
@@ -303,7 +303,7 @@ fn run_check(
     #[cfg(feature = "ml")]
     if layer >= 3 {
         eprintln!(
-            "note: layer 3 runs the code-aware NLI judge (code-doc-coherence-staleguard); \
+            "note: layer 3 runs the code-aware NLI judge (staleguard); \
              verdicts are advisory — review contradictions before acting."
         );
         let mut claims = Vec::new();

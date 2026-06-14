@@ -50,7 +50,7 @@ staleguard check --layer 3       # all three layers
 ```
 
 The Layer 3 judge is the
-[`code-doc-coherence-staleguard`](https://huggingface.co/Arthur920/code-doc-coherence-staleguard)
+[`staleguard`](https://huggingface.co/Arthur920/staleguard)
 model on Hugging Face (a `microsoft/unixcoder-base` fine-tune); it downloads on
 `setup` / first run. Override any model or threshold via `STALEGUARD_*` env vars —
 see [DETAILS.md](DETAILS.md#environment-overrides).

@@ -1,6 +1,6 @@
 //! Layer 3 verification: an NLI cross-encoder as the coherence judge.
 //!
-//! The judge is a **code-aware** NLI cross-encoder: `code-doc-coherence-staleguard`,
+//! The judge is a **code-aware** NLI cross-encoder: `staleguard`,
 //! a `microsoft/unixcoder-base` fine-tune over `(code premise, prose claim)` pairs
 //! that predicts `{entailment, neutral, contradiction}`. UniXcoder's code-aware
 //! pretraining keeps real code *in*-distribution as the premise, which is exactly
@@ -45,7 +45,7 @@ use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 use crate::retrieve;
 
-const DEFAULT_REPO: &str = "Arthur920/code-doc-coherence-staleguard";
+const DEFAULT_REPO: &str = "Arthur920/staleguard";
 const DEFAULT_ONNX: &str = "model_quantized.onnx";
 const DEFAULT_THRESHOLD: f32 = 0.5;
 /// How far contradiction must out-score entailment *within a single evidence

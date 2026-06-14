@@ -82,7 +82,7 @@ any reportable finding or a score regression — drop-in for CI.
   (rayon) and tree-sitter queries are compiled once and cached, so throughput
   scales with cores.
 - **Local & offline** — the jina embedding model (~160 MB) and the code-aware
-  NLI cross-encoder (`code-doc-coherence-staleguard`, a UniXcoder fine-tune, int8
+  NLI cross-encoder (`staleguard`, a UniXcoder fine-tune, int8
   ONNX ~121 MB) download once from the Hub, then run on-device. Code never leaves
   the machine.
 - **Content-hash caches** — unchanged files and code chunks are free on re-run;
@@ -103,7 +103,7 @@ capped run is ~45s; uncapped scales linearly with claim count.
 
 | Variable | Effect |
 |---|---|
-| `STALEGUARD_NLI_REPO` | NLI judge model repo (default `Arthur920/code-doc-coherence-staleguard`) |
+| `STALEGUARD_NLI_REPO` | NLI judge model repo (default `Arthur920/staleguard`) |
 | `STALEGUARD_NLI_ONNX` | ONNX artifact within the repo |
 | `STALEGUARD_NLI_THRESHOLD` / `STALEGUARD_NLI_MARGIN` | decision thresholds |
 | `STALEGUARD_NLI_MAX_CLAIMS` | per-run claim budget (default 300; `0` = no cap) |
@@ -116,7 +116,7 @@ capped run is ~45s; uncapped scales linearly with claim count.
 - **Layers 1–2** are the stable core and what most runs should rely on. Layer 1
   is deterministic and tuned to under-report rather than false-alarm.
 - **Layer 3** (the NLI judge) is newer. The default model,
-  [`code-doc-coherence-staleguard`](https://huggingface.co/Arthur920/code-doc-coherence-staleguard),
+  [`staleguard`](https://huggingface.co/Arthur920/staleguard),
   is a `microsoft/unixcoder-base` fine-tune trained specifically for this
   task — code-aware, so real code stays in-distribution as the premise (an
   earlier text-NLI model did not, and produced overconfident false
