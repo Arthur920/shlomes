@@ -10,7 +10,7 @@ checks docs against the actual codebase and reports what's stale, wrong, or
 missing.
 
 Fully local and offline. The deterministic core needs no model and is tuned for
-**zero false positives** — it under-reports rather than ever crying wolf.
+**zero false positives**.
 
 ## What it catches
 
