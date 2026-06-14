@@ -1,0 +1,72 @@
+name: Release
+
+# Tag a release with `git tag v0.1.0 && git push origin v0.1.0` to build
+# cross-platform binaries and attach them to a GitHub Release. Builds the
+# default (Layer 1) feature set — no ONNX deps — so binaries stay small and
+# fully self-contained.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -czf staleguard-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release staleguard
+          shasum -a 256 staleguard-${{ matrix.target }}.tar.gz \
+            > staleguard-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/${{ matrix.target }}/release/staleguard.exe `
+            -DestinationPath staleguard-${{ matrix.target }}.zip
+          (Get-FileHash staleguard-${{ matrix.target }}.zip -Algorithm SHA256).Hash `
+            | Out-File staleguard-${{ matrix.target }}.zip.sha256
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            staleguard-${{ matrix.target }}.tar.gz
+            staleguard-${{ matrix.target }}.tar.gz.sha256
+            staleguard-${{ matrix.target }}.zip
+            staleguard-${{ matrix.target }}.zip.sha256
+          fail_on_unmatched_files: false

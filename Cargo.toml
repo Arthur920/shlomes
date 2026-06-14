@@ -5,6 +5,10 @@ edition = "2021"
 description = "Sanity-check CLAUDE.md, project docs, and code against each other for coherence drift."
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/Arthur920/Staleguard"
+homepage = "https://github.com/Arthur920/Staleguard"
+keywords = ["documentation", "drift", "coherence", "tree-sitter", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "staleguard"
