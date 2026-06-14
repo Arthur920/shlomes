@@ -9,10 +9,7 @@ use super::{Diagram, DiagramKind, Edge, Format, Node};
 
 pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
     let stripped = strip_comments(body);
-    let directed = match graph_kind(&stripped) {
-        Some(d) => d,
-        None => return None,
-    };
+    let directed = graph_kind(&stripped)?;
 
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
@@ -60,7 +57,7 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
             }
         }
     }
-    drop(register); // release the &mut borrow of `nodes`
+    let _ = register; // drop closure, releasing the &mut borrow of `nodes`
 
     if edges.is_empty() && nodes.is_empty() {
         return None;

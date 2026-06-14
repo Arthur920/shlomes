@@ -571,7 +571,10 @@ mod tests {
     }
 
     fn scratch_dir(tag: &str) -> std::path::PathBuf {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("staleguard-rules-{tag}-{nanos}"));
         fs::create_dir_all(&dir).unwrap();
         dir

@@ -68,7 +68,7 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
         let stripped = strip_labels(stmt);
         parse_chain(&stripped, &mut register, &mut edges);
     }
-    drop(register); // release the &mut borrow of `nodes`
+    let _ = register; // drop closure, releasing the &mut borrow of `nodes`
 
     if edges.is_empty() && nodes.is_empty() {
         return None;

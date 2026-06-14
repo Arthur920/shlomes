@@ -80,12 +80,11 @@ fn from_sql(text: &str) -> Vec<Entity> {
         let header = &after[..paren_rel];
         let name = header
             .split_whitespace()
-            .filter(|w| {
+            .rfind(|w| {
                 !w.eq_ignore_ascii_case("if")
                     && !w.eq_ignore_ascii_case("not")
                     && !w.eq_ignore_ascii_case("exists")
             })
-            .next_back()
             .map(clean_ident)
             .unwrap_or_default();
 

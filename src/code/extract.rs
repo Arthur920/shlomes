@@ -415,7 +415,7 @@ fn extract_edges(language: Language, source: &[u8], module: &str) -> Vec<DepEdge
 mod tests {
     use super::*;
 
-    fn vis_of<'a>(syms: &'a [Symbol], name: &str) -> Option<Visibility> {
+    fn vis_of(syms: &[Symbol], name: &str) -> Option<Visibility> {
         syms.iter().find(|s| s.name == name).map(|s| s.visibility)
     }
 

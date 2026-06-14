@@ -74,7 +74,7 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
             });
         }
     }
-    drop(register); // release the &mut borrow of `nodes`
+    let _ = register; // drop closure, releasing the &mut borrow of `nodes`
 
     if edges.is_empty() && nodes.is_empty() {
         return None;

@@ -257,7 +257,7 @@ fn push_subcommands(raw: &str, lineno: usize, out: &mut Vec<(usize, String)>) {
 /// What kind of registry a parsed command resolves against.
 enum Target<'a> {
     NpmScript(&'a str),
-    MakeTarget(&'a str),
+    Make(&'a str),
     CargoBin(&'a str),
 }
 
@@ -274,7 +274,7 @@ pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
         };
         let (kind, name, registry, manifest) = match target {
             Target::NpmScript(n) => ("script", n, m.npm_scripts.as_ref(), "package.json"),
-            Target::MakeTarget(n) => ("make target", n, m.make_targets.as_ref(), "Makefile"),
+            Target::Make(n) => ("make target", n, m.make_targets.as_ref(), "Makefile"),
             Target::CargoBin(n) => ("cargo binary", n, m.cargo_bins.as_ref(), "Cargo.toml"),
         };
         // Only act when the registry exists (else we can't know the targets).
@@ -323,7 +323,7 @@ fn classify<'a>(toks: &[&'a str]) -> Option<Target<'a>> {
                     .find_map(|t| t.strip_prefix("--bin="))
                     .map(Target::CargoBin)
             }),
-        "make" => make_target(&toks[1..]).map(Target::MakeTarget),
+        "make" => make_target(&toks[1..]).map(Target::Make),
         _ => None,
     }
 }
