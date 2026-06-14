@@ -314,6 +314,14 @@ fn new_model() -> Result<TextEmbedding> {
     TextEmbedding::try_new_from_user_defined(model, opts)
 }
 
+/// Fetch (and cache) the embedding model so the first real run is offline.
+/// Triggers the Hub download and a full load, surfacing any auth/network error
+/// up front. Used by `shlomes setup`.
+pub fn prefetch_model() -> Result<()> {
+    new_model()?;
+    Ok(())
+}
+
 /// ONNX intra-op thread count: `SHLOMES_ORT_THREADS` if set, else every core.
 pub(crate) fn ort_threads() -> usize {
     std::env::var("SHLOMES_ORT_THREADS")

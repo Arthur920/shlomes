@@ -110,6 +110,10 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Prepare all layers: fetch the Layer 2/3 models so later runs are offline.
+    /// Layer 1 needs nothing; this download-and-load step is only meaningful in
+    /// the `ml` build, where it pulls the embedding model and the NLI judge.
+    Setup,
     /// Semantic code search using local jina embeddings (requires `ml` feature).
     #[cfg(feature = "ml")]
     Retrieve {
@@ -397,6 +401,47 @@ fn report_index(index: &CodeIndex, format: Format) {
     }
 }
 
+/// `shlomes setup`: ensure every layer is ready to run. Layer 1 is always
+/// available; in the `ml` build this fetches and loads the Layer 2 embedding
+/// model and the Layer 3 NLI judge so the first real `check --layer 3` is fully
+/// offline (and any model auth/network error surfaces here, not mid-run).
+fn run_setup() -> ExitCode {
+    println!("Layer 1 (deterministic): ready — no model needed.");
+
+    #[cfg(not(feature = "ml"))]
+    {
+        println!(
+            "Layers 2-3: this binary was built without the `ml` feature.\n\
+             Reinstall with models enabled:  cargo install --path . --features ml"
+        );
+        ExitCode::SUCCESS
+    }
+
+    #[cfg(feature = "ml")]
+    {
+        print!("Layer 2 (embeddings): fetching model ... ");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        if let Err(e) = retrieve::prefetch_model() {
+            println!("failed");
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!("ready.");
+
+        print!("Layer 3 (NLI judge): fetching model ... ");
+        let _ = std::io::stdout().flush();
+        if let Err(e) = judge::Judge::load() {
+            println!("failed");
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!("ready.");
+        println!("All layers ready. Run `shlomes check --layer 3`.");
+        ExitCode::SUCCESS
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -448,6 +493,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        Commands::Setup => run_setup(),
         #[cfg(feature = "ml")]
         Commands::Retrieve { query, path, k } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
