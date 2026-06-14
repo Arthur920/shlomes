@@ -28,6 +28,23 @@ pub fn repo_paths(root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Does `raw` resolve to a repo path? Either it stats directly under `repo_root`
+/// (handles dirs, `./`-prefixed and absolute paths) or some pre-walked repo path
+/// ends with it *on a segment boundary* — so a doc naming `auth.ts` matches
+/// `src/auth.ts` but not `src/oauth.ts`. The boundary check is what stops a stale
+/// path from being silently treated as present.
+fn path_exists(raw: &str, repo_root: &Path, repo_files: &[String]) -> bool {
+    if repo_root.join(raw).exists() {
+        return true;
+    }
+    let needle = raw.trim_start_matches("./");
+    repo_files.iter().any(|p| {
+        p == needle
+            || p.strip_suffix(needle)
+                .is_some_and(|head| head.ends_with(['/', '\\']))
+    })
+}
+
 /// Layer 1: every path a doc names by backtick should exist in the repo. Emits
 /// a `Supported` claim for paths that exist and a `Stale` one for those that do
 /// not; both are anchored (provenance) to the named path so drift lineage can
@@ -43,9 +60,9 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
     // Existence per distinct token, memoized (one stat / suffix scan each).
     let mut exists: HashMap<&str, bool> = HashMap::new();
     for c in claims {
-        exists.entry(c.raw.as_str()).or_insert_with(|| {
-            repo_root.join(&c.raw).exists() || repo_files.iter().any(|p| p.ends_with(&c.raw))
-        });
+        exists
+            .entry(c.raw.as_str())
+            .or_insert_with(|| path_exists(&c.raw, repo_root, repo_files));
     }
 
     // Migration rows: when one doc line names several paths and at least one
@@ -60,7 +77,10 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
     }
     let mut migrated: HashSet<(&str, usize, &str)> = HashSet::new();
     for group in by_line.values() {
-        if group.len() >= 2 && group.iter().any(|c| exists[c.raw.as_str()]) {
+        // Only table rows — a prose line listing several paths must not silently
+        // drop a genuinely-stale one.
+        let is_table = group.iter().all(|c| c.table_row);
+        if is_table && group.len() >= 2 && group.iter().any(|c| exists[c.raw.as_str()]) {
             for c in group {
                 if !exists[c.raw.as_str()] {
                     migrated.insert((c.doc_path.as_str(), c.line, c.raw.as_str()));
@@ -174,6 +194,71 @@ mod tests {
         assert!(
             findings.iter().all(|f| !f.verdict.is_reportable()),
             "migration old-path was flagged: {findings:?}"
+        );
+    }
+
+    fn flagged(findings: &[Finding]) -> Vec<&str> {
+        findings
+            .iter()
+            .filter(|f| f.verdict.is_reportable())
+            .map(|f| f.claim.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn prose_line_listing_paths_still_flags_a_stale_one() {
+        // Two paths in *prose* (not a table): a genuinely missing one must not be
+        // suppressed by the migration-row heuristic.
+        let dir = scratch_dir("prose");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/index.ts"), "//\n").unwrap();
+        let md = "Entry points: `src/index.ts`, `src/missing.ts`.";
+        let claims = extract_path_claims(md, "README.md");
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        assert!(
+            flagged(&findings).contains(&"references `src/missing.ts`"),
+            "stale path in prose was wrongly suppressed: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn suffix_match_respects_segment_boundaries() {
+        // `foo/index.ts` must NOT be satisfied by `prefoo/index.ts`; a real
+        // segment suffix (`core/index.ts` for `src/core/index.ts`) must resolve.
+        let dir = scratch_dir("boundary");
+        fs::create_dir_all(dir.join("prefoo")).unwrap();
+        fs::create_dir_all(dir.join("src/core")).unwrap();
+        fs::write(dir.join("prefoo/index.ts"), "//\n").unwrap();
+        fs::write(dir.join("src/core/index.ts"), "//\n").unwrap();
+        let md = "See `foo/index.ts` and `core/index.ts`.";
+        let claims = extract_path_claims(md, "README.md");
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let flagged = flagged(&findings);
+        assert!(
+            flagged.contains(&"references `foo/index.ts`"),
+            "foo/index.ts wrongly matched prefoo/index.ts: {findings:?}"
+        );
+        assert!(
+            !flagged.contains(&"references `core/index.ts`"),
+            "core/index.ts should resolve to src/core/index.ts: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn cue_word_inside_filename_does_not_self_suppress() {
+        // A stale path whose own name contains a cue word (`deleted`, `legacy`)
+        // must still be flagged — the cue scan ignores the path token itself.
+        let dir = scratch_dir("cuename");
+        let md = "The handler lives in `src/deleted_items.ts`.";
+        let claims = extract_path_claims(md, "README.md");
+        assert!(
+            claims.iter().all(|c| !c.historical),
+            "filename cue word wrongly marked path historical"
+        );
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        assert!(
+            flagged(&findings).contains(&"references `src/deleted_items.ts`"),
+            "stale path with cue-word filename was suppressed: {findings:?}"
         );
     }
 }

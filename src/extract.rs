@@ -19,6 +19,10 @@ pub struct PathClaim {
     /// migration "old → new" row. Such references must not yield stale-path
     /// findings: the missing file confirms the doc rather than contradicting it.
     pub historical: bool,
+    /// True when the source line is a markdown table row (contains `|`). The
+    /// migration "old → new" suppression only applies to table rows, so a prose
+    /// line that merely lists several paths doesn't silently drop a stale one.
+    pub table_row: bool,
 }
 
 /// `backtick-quoted` tokens that look like a relative file or dir path.
@@ -198,12 +202,23 @@ fn historical_cue_re() -> &'static Regex {
 /// header still covers the rows beneath it without bleeding into unrelated prose.
 const CONTEXT_WINDOW: usize = 4;
 
-/// Is the path on line `idx` named in a deletion/migration context?
+/// Inline-code spans (`` `...` ``), stripped before cue scanning so a cue word
+/// *inside a path token* (`src/deleted.ts`, `legacy_api.ts`) can't mark its own
+/// path as historical — only surrounding prose counts.
+fn code_span_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"`[^`]*`").unwrap())
+}
+
+/// Is the path on line `idx` named in a deletion/migration context? Cues are
+/// matched only against prose (inline-code spans removed), across the line and a
+/// small preceding window.
 fn in_historical_context(lines: &[&str], idx: usize) -> bool {
     let start = idx.saturating_sub(CONTEXT_WINDOW);
-    lines[start..=idx]
-        .iter()
-        .any(|l| historical_cue_re().is_match(l))
+    lines[start..=idx].iter().any(|l| {
+        let prose = code_span_re().replace_all(l, " ");
+        historical_cue_re().is_match(&prose)
+    })
 }
 
 /// Find backtick-quoted tokens that look like paths the repo should contain.
@@ -225,6 +240,7 @@ pub fn extract_path_claims(markdown: &str, doc_path: &str) -> Vec<PathClaim> {
                 doc_path: doc_path.to_string(),
                 line: i + 1,
                 historical: in_historical_context(&lines, i),
+                table_row: line.contains('|'),
             });
         }
     }
@@ -311,5 +327,13 @@ The file `Backend/src/http/async-handler.ts` no longer exists.
     fn ordinary_path_is_not_historical() {
         let claims = extract_path_claims("The entry point is `src/main.ts`.", "README.md");
         assert!(claims.iter().all(|c| !c.historical));
+    }
+
+    #[test]
+    fn table_rows_are_tagged_prose_is_not() {
+        let table = extract_path_claims("| `a/old.ts` | `b/new.ts` |", "PLAN.md");
+        assert!(!table.is_empty() && table.iter().all(|c| c.table_row));
+        let prose = extract_path_claims("Paths `a/old.ts` and `b/new.ts`.", "README.md");
+        assert!(!prose.is_empty() && prose.iter().all(|c| !c.table_row));
     }
 }
