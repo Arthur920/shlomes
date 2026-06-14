@@ -5,7 +5,7 @@
 # shlomes
 
 Catch **documentation drift** — places where your `CLAUDE.md`, READMEs, and
-`*.md` docs claim something the code no longer (or never did) backs up. shlomes
+`*.md` docs claim something the code no longer backs up. shlomes
 checks docs against the actual codebase and reports what's stale, wrong, or
 missing.
 
