@@ -1,0 +1,90 @@
+# Keeps the hand-maintained `staleguard-ml` Homebrew formula in sync. dist only
+# manages the prebuilt `staleguard` formula; the ml build compiles from source,
+# so its formula just needs the new source-tarball URL + sha256 each release.
+#
+# Triggers on version tags (the GitHub source tarball exists as soon as the tag
+# does, independent of the dist release job), plus manual dispatch for re-runs.
+name: Update staleguard-ml formula
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.1.2)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag and version
+        id: v
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute source tarball sha256
+        id: src
+        run: |
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${{ steps.v.outputs.tag }}.tar.gz"
+          curl --fail -sL "$URL" -o src.tar.gz
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum src.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: Arthur920/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render formula
+        run: |
+          mkdir -p tap/Formula
+          # Quoted heredoc: bash performs no expansion, so the Ruby backticks and
+          # `#{bin}` stay literal. The ${{ }} values are substituted by Actions
+          # before bash runs.
+          cat > tap/Formula/staleguard-ml.rb <<'RUBY'
+          class StaleguardMl < Formula
+            desc "Doc-drift checker with local ML layers (embeddings + NLI judge)"
+            homepage "https://github.com/Arthur920/Staleguard"
+            url "__URL__"
+            sha256 "__SHA__"
+            license "MIT"
+
+            depends_on "rust" => :build
+
+            conflicts_with "staleguard", because: "both install a `staleguard` binary"
+
+            def install
+              system "cargo", "install", "--features", "ml", *std_cargo_args
+            end
+
+            test do
+              assert_match "staleguard", shell_output("#{bin}/staleguard --version")
+            end
+          end
+          RUBY
+          # Inject the dynamic values via sed (keeps them out of the heredoc body).
+          sed -i "s|__URL__|${{ steps.src.outputs.url }}|; s|__SHA__|${{ steps.src.outputs.sha256 }}|" \
+            tap/Formula/staleguard-ml.rb
+
+      - name: Commit and push
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/staleguard-ml.rb
+          if git diff --staged --quiet; then
+            echo "Formula already up to date for ${{ steps.v.outputs.version }}."
+            exit 0
+          fi
+          git commit -m "staleguard-ml: bump to ${{ steps.v.outputs.version }}"
+          git push
