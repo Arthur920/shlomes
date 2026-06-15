@@ -423,8 +423,11 @@ fn run_setup() -> ExitCode {
     #[cfg(not(feature = "ml"))]
     {
         println!(
-            "Layers 2-3: this binary was built without the `ml` feature.\n\
-             Reinstall with models enabled:  cargo install --path . --features ml"
+            "Layers 2-3: this binary was built without the `ml` feature, so there \
+             are no models to fetch.\n\
+             Build with models enabled (the prebuilt/Homebrew binaries omit the \
+             heavy ONNX deps):\n  \
+             cargo install --git https://github.com/Arthur920/Staleguard --features ml"
         );
         ExitCode::SUCCESS
     }

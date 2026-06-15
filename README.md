@@ -30,24 +30,44 @@ with a CI alignment score. Full breakdown in [DETAILS.md](DETAILS.md).
 Layer 1 is instant and needs nothing. Layers 2–3 run local ONNX models (no API,
 code never leaves the machine) and live behind the `ml` build feature.
 
-## Setup
+## Install
 
 ```bash
-# Layer 1 only (no models):
-cargo install --path .
+# Homebrew (macOS / Linux)
+brew install Arthur920/tap/staleguard
 
-# All layers (downloads the Layer 2/3 models on setup):
-cargo install --path . --features ml
-staleguard setup        # fetch + load every model, fully offline thereafter
+# or the install script (macOS / Linux)
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/Arthur920/Staleguard/releases/latest/download/staleguard-installer.sh | sh
+
+# or from source
+cargo install --git https://github.com/Arthur920/Staleguard
 ```
 
-`staleguard setup` prepares all layers and surfaces any model download error up
-front. Then:
+(Windows: a PowerShell installer is attached to each
+[release](https://github.com/Arthur920/Staleguard/releases).)
+
+All of these give you **Layer 1** — the deterministic, zero-false-positive core,
+which needs no models. Then:
 
 ```bash
 staleguard check                 # full repo (Layer 1)
+```
+
+### Layers 2–3 (local ML)
+
+Layers 2–3 run local ONNX models and must be built with the `ml` feature, which
+the prebuilt binaries omit (the ONNX + embedding deps are large). Build from
+source to enable them:
+
+```bash
+cargo install --git https://github.com/Arthur920/Staleguard --features ml
+staleguard setup                 # fetch + load every model, offline thereafter
 staleguard check --layer 3       # all three layers
 ```
+
+`staleguard setup` prepares all layers and surfaces any model download error up
+front.
 
 The Layer 3 judge is the
 [`staleguard`](https://huggingface.co/Arthur920/staleguard)
@@ -74,7 +94,7 @@ Example GitHub Actions step:
 ```yaml
 - name: doc-coherence
   run: |
-    cargo install --path .          # Layer 1 is fast and dependency-light
+    brew install Arthur920/tap/staleguard   # or: cargo install --git https://github.com/Arthur920/Staleguard
     staleguard check --fail-on-regression --format json
 ```
 
