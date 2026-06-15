@@ -1,6 +1,6 @@
 [package]
 name = "staleguard"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Sanity-check CLAUDE.md, project docs, and code against each other for coherence drift."
 license = "MIT"
