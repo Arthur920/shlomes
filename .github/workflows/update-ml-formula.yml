@@ -49,8 +49,8 @@ jobs:
         run: |
           mkdir -p tap/Formula
           # Quoted heredoc: bash performs no expansion, so the Ruby backticks and
-          # `#{bin}` stay literal. The ${{ }} values are substituted by Actions
-          # before bash runs.
+          # interpolations stay literal. URL/sha are injected by sed below, so no
+          # Actions expressions appear inside the heredoc body.
           cat > tap/Formula/staleguard-ml.rb <<'RUBY'
           class StaleguardMl < Formula
             desc "Doc-drift checker with local ML layers (embeddings + NLI judge)"
