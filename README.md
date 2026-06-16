@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="staleguard.png" alt="Staleguard logo" width="320">
+  <img src="staleguard.png" alt="Staleguard logo" width="200">
 </p>
 
 # Staleguard
