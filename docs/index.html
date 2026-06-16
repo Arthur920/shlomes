@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staleguard — guard your docs against drift</title>
+<meta name="description" content="Staleguard catches documentation drift — where your CLAUDE.md, READMEs, and docs claim something the code no longer backs up. Fully local, offline, tuned for zero false positives.">
+<meta property="og:title" content="Staleguard">
+<meta property="og:description" content="Catch documentation drift, fully local and offline. A deterministic core tuned for zero false positives, plus a code-aware NLI judge.">
+<meta property="og:image" content="staleguard.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=UnifrakturCook:wght@700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* steel / armory palette */
+    --void: #0a0c0f;
+    --iron: #11151a;
+    --steel: #1a2027;
+    --steel-2: #232b34;
+    --edge: #313b46;
+    --rivet: #475260;
+    --ash: #8b97a4;
+    --ash-2: #aab4be;
+    --bone: #e6e9ec;
+    --brass: #d2a44f;
+    --brass-bright: #f0c068;
+    --brass-deep: #9c7a35;
+    --blade: #7fa6bf;
+    --good: #6fb98f;
+    --bad: #c9756b;
+    --r: 3px;
+    --maxw: 1180px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--void);
+    color: var(--bone);
+    font-family: "Spectral", Georgia, serif;
+    font-weight: 400;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* forged background — gradient mesh + grain + faint hatch */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(900px 600px at 78% -5%, rgba(210,164,79,0.10), transparent 60%),
+      radial-gradient(800px 700px at 10% 8%, rgba(127,166,191,0.08), transparent 55%),
+      radial-gradient(1000px 900px at 50% 110%, rgba(35,43,52,0.9), transparent 60%),
+      linear-gradient(180deg, #0a0c0f 0%, #0c0f13 40%, #0a0c0f 100%);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--brass); color: var(--void); }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 11px; }
+  ::-webkit-scrollbar-track { background: var(--iron); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 6px; border: 2px solid var(--iron); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--rivet); }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
+
+  /* ---------- shared type ---------- */
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 500;
+  }
+  h2.section-title {
+    font-family: "Cinzel", serif;
+    font-weight: 600;
+    font-size: clamp(1.9rem, 4vw, 3rem);
+    letter-spacing: 0.02em;
+    line-height: 1.1;
+    margin: 0.4rem 0 1.1rem;
+    color: var(--bone);
+  }
+  .section-lead {
+    color: var(--ash-2);
+    font-size: 1.08rem;
+    max-width: 60ch;
+    font-weight: 300;
+  }
+  section { padding: clamp(80px, 11vw, 150px) 0; position: relative; }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 28px;
+    backdrop-filter: blur(10px);
+    background: rgba(10,12,15,0.55);
+    border-bottom: 1px solid transparent;
+    transition: border-color .4s, background .4s;
+  }
+  nav.scrolled { border-bottom-color: var(--edge); background: rgba(10,12,15,0.86); }
+  .nav-brand { display: flex; align-items: center; gap: 11px; }
+  .nav-brand img { height: 34px; width: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .nav-brand span {
+    font-family: "UnifrakturCook", cursive;
+    font-size: 1.55rem; line-height: 1;
+    color: var(--bone);
+    padding-top: 4px;
+  }
+  .nav-links { display: flex; align-items: center; gap: 30px; }
+  .nav-links a {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem; letter-spacing: 0.06em;
+    color: var(--ash); transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--bone); }
+  .nav-gh {
+    border: 1px solid var(--edge); padding: 7px 15px; border-radius: var(--r);
+    color: var(--bone) !important; transition: border-color .2s, background .2s;
+  }
+  .nav-gh:hover { border-color: var(--brass); background: rgba(210,164,79,0.08); }
+  @media (max-width: 720px) { .nav-links a:not(.nav-gh) { display: none; } }
+
+  /* ---------- hero ---------- */
+  .hero {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    align-items: center;
+    gap: 40px;
+    padding-top: 120px;
+    padding-bottom: 80px;
+    position: relative;
+  }
+  .hero-copy, .hero-shield { position: relative; z-index: 2; }
+
+  /* knight-by-campfire scene anchored to the right, fading into the page */
+  .hero-bg {
+    position: absolute;
+    top: 0; bottom: 0;
+    /* bleed the right edge to the viewport edge regardless of the content
+       max-width, so the right side never shows a hard box edge */
+    right: calc(50% - 50vw);
+    width: 56vw;
+    z-index: 0;
+    background: url("knight.png") right center / cover no-repeat;
+    pointer-events: none;
+    /* Box-relative edge fades. These must be relative to the box, not the
+       image: `cover` crops the image differently at every viewport width, so
+       any fade baked into the PNG gets cropped off. A mask fades the box edges
+       regardless of crop. Intersect a horizontal (left) and vertical (top +
+       bottom) gradient so the scene dissolves on three edges and the right
+       bleeds to the page edge. Masking the image to transparent reveals the
+       page (mesh included), so there is never an opaque seam. */
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0%, #000 38%),
+      linear-gradient(180deg, #000 0%, #000 86%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(90deg, transparent 0%, #000 38%),
+      linear-gradient(180deg, #000 0%, #000 86%, transparent 100%);
+    mask-composite: intersect;
+  }
+  @media (max-width: 900px) {
+    .hero-bg { width: 100%; opacity: 0.4; }
+  }
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; text-align: center; padding-top: 130px; }
+    .hero-shield { order: -1; margin: 0 auto; }
+  }
+
+  .hero-tag {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ash-2);
+    border: 1px solid var(--edge); border-radius: 100px;
+    padding: 6px 14px; margin-bottom: 26px;
+  }
+  .hero-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+  @media (max-width: 900px) { .hero-tag { margin-left: auto; margin-right: auto; } }
+
+  .hero h1 {
+    font-family: "UnifrakturCook", cursive;
+    font-weight: 700;
+    font-size: clamp(3.6rem, 9vw, 6.4rem);
+    line-height: 0.9;
+    letter-spacing: 0.01em;
+    color: var(--bone);
+    text-shadow: 0 2px 30px rgba(0,0,0,.5);
+    margin-bottom: 8px;
+  }
+  .hero h1 .em { color: var(--brass); }
+  .hero-sub {
+    font-family: "Cinzel", serif;
+    font-size: clamp(1.05rem, 2.2vw, 1.45rem);
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ash-2); font-weight: 500;
+    margin-bottom: 26px;
+  }
+  .hero-desc {
+    font-size: 1.15rem; color: var(--ash-2); font-weight: 300;
+    max-width: 46ch; margin-bottom: 32px;
+  }
+  @media (max-width: 900px) { .hero-desc { margin-left: auto; margin-right: auto; } }
+  .hero-desc strong { color: var(--bone); font-weight: 600; }
+
+  .install-line {
+    display: flex; align-items: stretch;
+    background: var(--iron);
+    border: 1px solid var(--edge);
+    border-radius: var(--r);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.9rem;
+    max-width: 460px; margin-bottom: 26px;
+    overflow: hidden;
+  }
+  @media (max-width: 900px) { .install-line { margin-left: auto; margin-right: auto; } }
+  .install-line code {
+    padding: 14px 16px; flex: 1; color: var(--bone);
+    white-space: nowrap; overflow-x: auto; text-align: left;
+  }
+  .install-line code .sigil { color: var(--brass); user-select: none; }
+  .copy-btn {
+    border: none; border-left: 1px solid var(--edge);
+    background: var(--steel); color: var(--ash);
+    font-family: "JetBrains Mono", monospace; font-size: 0.72rem;
+    padding: 0 16px; cursor: pointer; letter-spacing: 0.08em;
+    transition: background .2s, color .2s;
+  }
+  .copy-btn:hover { background: var(--steel-2); color: var(--brass); }
+  .copy-btn.copied { color: var(--good); }
+
+  .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
+  @media (max-width: 900px) { .hero-cta { justify-content: center; } }
+  .btn {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.82rem; letter-spacing: 0.06em;
+    padding: 12px 22px; border-radius: var(--r);
+    cursor: pointer; transition: transform .15s, box-shadow .25s, background .25s;
+    display: inline-flex; align-items: center; gap: 9px;
+  }
+  .btn-primary {
+    background: linear-gradient(180deg, var(--brass-bright), var(--brass));
+    color: #1a1407; font-weight: 700; border: 1px solid var(--brass-deep);
+    box-shadow: 0 6px 20px rgba(210,164,79,0.22);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(210,164,79,0.35); }
+  .btn-ghost { background: transparent; color: var(--bone); border: 1px solid var(--edge); }
+  .btn-ghost:hover { border-color: var(--ash); transform: translateY(-2px); }
+
+  /* shield art */
+  .hero-shield { position: relative; display: flex; justify-content: center; align-items: center; }
+  .hero-shield::before {
+    content: ""; position: absolute; width: 115%; height: 115%;
+    background: radial-gradient(circle, rgba(210,164,79,0.16), transparent 62%);
+    filter: blur(6px);
+  }
+  .hero-shield img {
+    width: min(310px, 66%); position: relative; z-index: 1;
+    filter: drop-shadow(0 22px 40px rgba(0,0,0,.6));
+    animation: float 7s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+  .ring {
+    position: absolute; border: 1px solid var(--edge); border-radius: 50%;
+    opacity: 0.4; z-index: 0;
+  }
+  .ring.r1 { width: 290px; height: 290px; animation: spin 40s linear infinite; border-style: dashed; }
+  .ring.r2 { width: 370px; height: 370px; opacity: 0.22; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 520px) { .ring { display: none; } }
+
+  /* ---------- forged divider ---------- */
+  .divider {
+    height: 1px; background: linear-gradient(90deg, transparent, var(--edge), transparent);
+    max-width: var(--maxw); margin: 0 auto;
+  }
+  /* sections that open directly beneath a rule need extra headroom */
+  #detect, #install { padding-top: clamp(96px, 12vw, 168px); }
+  #detect { padding-bottom: clamp(100px, 12vw, 170px); }
+
+  /* ---------- layers ---------- */
+  .layers-grid { display: grid; gap: 18px; margin-top: 56px; }
+  .layer {
+    display: grid; grid-template-columns: 88px 1fr auto; align-items: center; gap: 28px;
+    background: linear-gradient(180deg, var(--steel), var(--iron));
+    border: 1px solid var(--edge); border-radius: var(--r);
+    padding: 30px 34px; position: relative; overflow: hidden;
+    transition: border-color .3s, transform .3s;
+  }
+  .layer::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--accent, var(--rivet));
+  }
+  .layer:hover { border-color: var(--accent, var(--rivet)); transform: translateX(4px); }
+  .layer-num {
+    font-family: "Cinzel", serif; font-size: 3.2rem; font-weight: 700;
+    color: var(--accent, var(--ash)); line-height: 1; opacity: 0.85;
+  }
+  .layer-body h3 {
+    font-family: "Cinzel", serif; font-size: 1.4rem; font-weight: 600;
+    margin-bottom: 6px; letter-spacing: 0.03em;
+  }
+  .layer-body p { color: var(--ash-2); font-weight: 300; max-width: 58ch; }
+  .layer-meta {
+    font-family: "JetBrains Mono", monospace; font-size: 0.68rem;
+    letter-spacing: 0.12em; text-transform: uppercase; text-align: right;
+    color: var(--ash); white-space: nowrap;
+  }
+  .layer-meta .accent { color: var(--accent); display: block; margin-top: 4px; }
+  .layer.l1 { --accent: var(--good); }
+  .layer.l2 { --accent: var(--blade); }
+  .layer.l3 { --accent: var(--brass); }
+  @media (max-width: 760px) {
+    .layer { grid-template-columns: 60px 1fr; padding: 24px; gap: 18px; }
+    .layer-num { font-size: 2.4rem; }
+    .layer-meta { display: none; }
+  }
+  .ledger-note {
+    font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
+    color: var(--ash); text-align: center; margin-top: 26px; letter-spacing: 0.04em;
+  }
+  .ledger-note b { color: var(--brass); font-weight: 500; }
+
+  /* ---------- features ---------- */
+  .feat-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px; margin-top: 56px;
+  }
+  .feat {
+    background: var(--iron); border: 1px solid var(--edge); border-radius: var(--r);
+    padding: 28px; transition: transform .3s, border-color .3s, background .3s;
+    position: relative;
+  }
+  .feat:hover { transform: translateY(-4px); border-color: var(--rivet); background: var(--steel); }
+  .feat .glyph {
+    font-family: "JetBrains Mono", monospace; font-size: 0.7rem; letter-spacing: 0.2em;
+    color: var(--brass); margin-bottom: 16px; display: block;
+  }
+  .feat h3 { font-family: "Cinzel", serif; font-size: 1.2rem; font-weight: 600; margin-bottom: 10px; }
+  .feat ul { list-style: none; }
+  .feat li {
+    color: var(--ash-2); font-weight: 300; font-size: 0.98rem;
+    padding-left: 18px; position: relative; margin-bottom: 6px;
+  }
+  .feat li::before { content: "›"; position: absolute; left: 0; color: var(--brass); font-family: monospace; }
+  .feat li code {
+    font-family: "JetBrains Mono", monospace; font-size: 0.82rem;
+    color: var(--blade); background: rgba(127,166,191,0.08); padding: 1px 5px; border-radius: 2px;
+  }
+
+  /* ---------- model metrics ---------- */
+  .metrics { background: var(--iron); border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge); }
+  .metrics-head { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: end; }
+  @media (max-width: 820px) { .metrics-head { grid-template-columns: 1fr; gap: 16px; } }
+
+  .metric-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 48px; }
+  @media (max-width: 560px) { .metric-cards { grid-template-columns: 1fr; } }
+  .metric {
+    background: linear-gradient(180deg, var(--steel), var(--iron));
+    border: 1px solid var(--edge); border-radius: var(--r);
+    padding: 32px; position: relative; overflow: hidden;
+  }
+  .metric.hero-metric { border-color: var(--brass-deep); }
+  .metric.hero-metric::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(400px 200px at 100% 0%, rgba(210,164,79,0.10), transparent);
+    pointer-events: none;
+  }
+  .metric .label {
+    font-family: "JetBrains Mono", monospace; font-size: 0.72rem;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--ash); margin-bottom: 12px;
+  }
+  .metric .num {
+    font-family: "Cinzel", serif; font-weight: 700; line-height: 1;
+    font-size: clamp(2.8rem, 6vw, 4rem); color: var(--bone);
+  }
+  .metric.hero-metric .num { color: var(--brass-bright); }
+  .metric .target {
+    font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
+    color: var(--ash-2); margin-top: 12px;
+  }
+  .metric .target .ok { color: var(--good); }
+  .metric .target .over { color: var(--blade); }
+
+  .bars { margin-top: 48px; display: grid; gap: 18px; max-width: 720px; }
+  .bar-row { display: grid; grid-template-columns: 130px 1fr 96px; align-items: center; gap: 18px; }
+  .bar-row .name { font-family: "JetBrains Mono", monospace; font-size: 0.8rem; color: var(--ash-2); }
+  .bar-track { height: 10px; background: var(--steel); border-radius: 100px; overflow: hidden; border: 1px solid var(--edge); }
+  .bar-fill { height: 100%; border-radius: 100px; width: 0; transition: width 1.2s cubic-bezier(.2,.8,.2,1); }
+  .bar-fill.tuned { background: linear-gradient(90deg, var(--brass-deep), var(--brass-bright)); }
+  .bar-fill.base { background: var(--rivet); }
+  .bar-row .val { font-family: "JetBrains Mono", monospace; font-size: 0.82rem; text-align: right; color: var(--bone); }
+  .bars-legend { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--ash); margin-top: 8px; display: flex; gap: 22px; flex-wrap: wrap; }
+  .bars-legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .bars-legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  @media (max-width: 560px) { .bar-row { grid-template-columns: 90px 1fr 60px; gap: 10px; } }
+
+  /* ---------- usage / code blocks ---------- */
+  .tabs { display: flex; gap: 6px; margin-top: 48px; flex-wrap: wrap; }
+  .tab {
+    font-family: "JetBrains Mono", monospace; font-size: 0.78rem; letter-spacing: 0.06em;
+    padding: 10px 18px; border: 1px solid var(--edge); border-radius: var(--r);
+    background: transparent; color: var(--ash); cursor: pointer; transition: all .2s;
+  }
+  .tab:hover { color: var(--bone); }
+  .tab.active { background: var(--steel); color: var(--brass); border-color: var(--rivet); }
+
+  .panel { display: none; margin-top: 20px; animation: fade .4s ease; }
+  .panel.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .panel .lead { color: var(--ash-2); font-weight: 300; max-width: 64ch; margin-bottom: 20px; }
+  .panel .lead code { font-family: "JetBrains Mono", monospace; font-size: 0.85rem; color: var(--blade); }
+
+  .code-block {
+    background: var(--iron); border: 1px solid var(--edge); border-radius: var(--r);
+    position: relative; overflow: hidden;
+  }
+  .code-block .bar {
+    display: flex; align-items: center; gap: 7px;
+    padding: 11px 16px; border-bottom: 1px solid var(--edge); background: var(--steel);
+  }
+  .code-block .bar .lights { display: flex; gap: 6px; }
+  .code-block .bar .lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--rivet); display: block; }
+  .code-block .bar .title {
+    font-family: "JetBrains Mono", monospace; font-size: 0.72rem;
+    color: var(--ash); margin-left: 6px; letter-spacing: 0.06em;
+  }
+  .code-block .bar .copy-btn { margin-left: auto; border: 1px solid var(--edge); border-radius: 2px; padding: 4px 11px; }
+  .code-block pre {
+    padding: 20px 18px; overflow-x: auto;
+    font-family: "JetBrains Mono", monospace; font-size: 0.86rem; line-height: 1.85;
+  }
+  .code-block pre .sigil { color: var(--brass); user-select: none; }
+  .code-block pre .cmd { color: var(--bone); }
+  .code-block pre .flag { color: var(--blade); }
+  .code-block pre .cm { color: var(--ash); font-style: italic; }
+  .code-block pre .str { color: var(--good); }
+
+  .env-table { margin-top: 36px; width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  .env-table th, .env-table td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--edge); }
+  .env-table th { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ash); }
+  .env-table td:first-child { font-family: "JetBrains Mono", monospace; font-size: 0.82rem; color: var(--brass); white-space: nowrap; }
+  .env-table td { color: var(--ash-2); font-weight: 300; }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--edge); padding: 70px 0 60px; }
+  .footer-grid { display: flex; justify-content: space-between; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
+  .footer-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .footer-brand img { height: 40px; width: auto; }
+  .footer-brand span { font-family: "UnifrakturCook", cursive; font-size: 1.7rem; padding-top: 5px; }
+  .footer-note { color: var(--ash); font-weight: 300; font-size: 0.92rem; max-width: 52ch; font-style: italic; }
+  .footer-links { display: flex; flex-direction: column; gap: 10px; font-family: "JetBrains Mono", monospace; font-size: 0.82rem; }
+  .footer-links a { color: var(--ash); transition: color .2s; }
+  .footer-links a:hover { color: var(--brass); }
+  .footer-base { margin-top: 50px; padding-top: 26px; border-top: 1px solid var(--edge); font-family: "JetBrains Mono", monospace; font-size: 0.74rem; color: var(--rivet); letter-spacing: 0.06em; }
+
+  /* ---------- reveal animation ---------- */
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity .8s cubic-bezier(.2,.8,.2,1), transform .8s cubic-bezier(.2,.8,.2,1); }
+  .reveal.in { opacity: 1; transform: none; }
+  .stagger > * { opacity: 0; transform: translateY(20px); transition: opacity .7s, transform .7s; }
+  .stagger.in > * { opacity: 1; transform: none; }
+  .stagger.in > *:nth-child(1) { transition-delay: .05s; }
+  .stagger.in > *:nth-child(2) { transition-delay: .13s; }
+  .stagger.in > *:nth-child(3) { transition-delay: .21s; }
+  .stagger.in > *:nth-child(4) { transition-delay: .29s; }
+  .stagger.in > *:nth-child(5) { transition-delay: .37s; }
+  .stagger.in > *:nth-child(6) { transition-delay: .45s; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal, .stagger > * { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a class="nav-brand" href="#top">
+    <img src="staleguard.png" alt="Staleguard shield">
+    <span>Staleguard</span>
+  </a>
+  <div class="nav-links">
+    <a href="#layers">Layers</a>
+    <a href="#detect">Detects</a>
+    <a href="#model">Model</a>
+    <a href="#install">Install</a>
+    <a class="nav-gh" href="https://github.com/Arthur920/Staleguard" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</nav>
+
+<header id="top" class="wrap hero">
+  <div class="hero-bg"></div>
+  <div class="hero-copy">
+    <div class="hero-tag stagger"><span class="dot"></span><span>fully local · offline · zero false positives</span></div>
+    <h1 class="stagger">Stale<span class="em">guard</span></h1>
+    <div class="hero-sub stagger">Guard your docs against drift</div>
+    <p class="hero-desc stagger">Catches the places where your <strong>CLAUDE.md</strong>, READMEs, and <code>*.md</code> docs claim something the code no longer backs up. Checks docs against the <strong>actual codebase</strong> and reports what's stale, wrong, or missing.</p>
+    <div class="install-line stagger">
+      <code><span class="sigil">$ </span>brew install Arthur920/tap/staleguard</code>
+      <button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard">COPY</button>
+    </div>
+    <div class="hero-cta stagger">
+      <a class="btn btn-primary" href="#install">Install →</a>
+      <a class="btn btn-ghost" href="https://github.com/Arthur920/Staleguard" target="_blank" rel="noopener">View source</a>
+    </div>
+  </div>
+</header>
+
+<div class="divider"></div>
+
+<!-- LAYERS -->
+<section id="layers" class="wrap">
+  <p class="eyebrow reveal">The architecture</p>
+  <h2 class="section-title reveal">Three layers, escalating only when needed</h2>
+  <p class="section-lead reveal">Each layer is cheaper and higher-signal than the next, so most drift is caught before any model runs. Layer&nbsp;1 is instant and needs nothing; Layers&nbsp;2–3 run local ONNX models — code never leaves the machine.</p>
+
+  <div class="layers-grid stagger">
+    <div class="layer l1">
+      <div class="layer-num">I</div>
+      <div class="layer-body">
+        <h3>Deterministic</h3>
+        <p>Paths exist? Commands real? Config keys present? Architecture rules parsed from prose, checked against the real import graph. No ML — tuned for zero false positives.</p>
+      </div>
+      <div class="layer-meta">instant · no model<span class="accent">~1.2s on 330k LOC</span></div>
+    </div>
+    <div class="layer l2">
+      <div class="layer-num">II</div>
+      <div class="layer-body">
+        <h3>Retrieval</h3>
+        <p>For each surviving claim, local embeddings fetch the most-relevant code chunks — symbol-aligned via tree-sitter, with an optional reranker.</p>
+      </div>
+      <div class="layer-meta">local embeddings<span class="accent">jina · on-device</span></div>
+    </div>
+    <div class="layer l3">
+      <div class="layer-num">III</div>
+      <div class="layer-body">
+        <h3>Verification</h3>
+        <p>A code-aware NLI cross-encoder judges <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">(evidence, claim)</code> → supported · contradicted · unverifiable, each with a confidence.</p>
+      </div>
+      <div class="layer-meta">UniXcoder fine-tune<span class="accent">~0.14s / claim</span></div>
+    </div>
+  </div>
+  <p class="ledger-note reveal">Underneath sits a <b>drift ledger</b> — makes runs incremental, scores alignment, and gates CI on regressions.</p>
+</section>
+
+<div class="divider"></div>
+
+<!-- DETECT -->
+<section id="detect" class="wrap">
+  <p class="eyebrow reveal">What it catches</p>
+  <h2 class="section-title reveal">Six classes of documentation drift</h2>
+
+  <div class="feat-grid stagger">
+    <div class="feat">
+      <span class="glyph">// REFERENCES</span>
+      <h3>Broken references</h3>
+      <ul>
+        <li>file/dir paths quoted in docs that don't exist</li>
+        <li>commands (<code>npm run</code>, <code>make</code>) with no matching script or target</li>
+        <li>env vars &amp; flags documented but never read</li>
+        <li>qualified code refs that resolve to no symbol</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <span class="glyph">// ARCHITECTURE</span>
+      <h3>Architecture violations</h3>
+      <ul>
+        <li>forbidden imports — "controllers must not import db"</li>
+        <li>layering — "domain depends on nothing"</li>
+        <li>independence — "core is independent of infra"</li>
+        <li>forbidden symbols outside their allowed module</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <span class="glyph">// BEHAVIOR</span>
+      <h3>Behavioral contradictions</h3>
+      <ul>
+        <li>a local NLI cross-encoder judges prose the rules can't</li>
+        <li>verdicts: supported / contradicted / unverifiable</li>
+        <li>claims ground to symbols — a verdict re-opens when that code changes</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <span class="glyph">// COVERAGE</span>
+      <h3>Coverage gaps</h3>
+      <ul>
+        <li>public code surface that no doc describes</li>
+        <li>risk-ranked by fan-in, churn, and complexity</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <span class="glyph">// DIAGRAMS</span>
+      <h3>Diagram coherence</h3>
+      <ul>
+        <li>Mermaid / PlantUML / Graphviz diffed against the real graph</li>
+        <li>phantom edges, stale boxes, missing arrows</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <span class="glyph">// DRIFT</span>
+      <h3>Drift over time</h3>
+      <ul>
+        <li><code>--diff &lt;ref&gt;</code> re-checks only what changed</li>
+        <li>per-module &amp; repo-wide alignment score</li>
+        <li>CI regression gate; fingerprint staleness</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- MODEL -->
+<section id="model" class="metrics">
+  <div class="wrap">
+    <div class="metrics-head">
+      <div>
+        <p class="eyebrow reveal">The Layer&nbsp;3 judge</p>
+        <h2 class="section-title reveal">A code-aware NLI model, evaluated against real targets</h2>
+      </div>
+      <p class="section-lead reveal">The default judge is <a href="https://huggingface.co/Arthur920/staleguard" target="_blank" rel="noopener" style="color:var(--brass);border-bottom:1px solid var(--brass-deep)">Arthur920/staleguard</a> — a <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">microsoft/unixcoder-base</code> fine-tune. Code-aware, so real code stays in-distribution as the premise. The alert class — contradictions — is what we optimize for.</p>
+    </div>
+
+    <div class="metric-cards stagger">
+      <div class="metric hero-metric">
+        <div class="label">Contradiction precision</div>
+        <div class="num">87.6%</div>
+        <div class="target"><span class="ok">low alert fatigue</span> — flags you can trust</div>
+      </div>
+      <div class="metric hero-metric">
+        <div class="label">Contradiction recall</div>
+        <div class="num">89.9%</div>
+        <div class="target"><span class="over">catches ~9 in 10</span> contradictions</div>
+      </div>
+    </div>
+
+    <div class="bars reveal" id="bars">
+      <div class="bar-row">
+        <span class="name">contradiction&nbsp;F1</span>
+        <div class="bar-track"><div class="bar-fill tuned" data-w="88.7"></div></div>
+        <span class="val">0.887</span>
+      </div>
+      <div class="bar-row">
+        <span class="name">neutral&nbsp;F1</span>
+        <div class="bar-track"><div class="bar-fill tuned" data-w="84.3"></div></div>
+        <span class="val">0.843</span>
+      </div>
+      <div class="bar-row">
+        <span class="name">entailment&nbsp;F1</span>
+        <div class="bar-track"><div class="bar-fill tuned" data-w="69.0"></div></div>
+        <span class="val">0.690</span>
+      </div>
+      <div class="bar-row">
+        <span class="name">macro&nbsp;F1</span>
+        <div class="bar-track"><div class="bar-fill tuned" data-w="80.7"></div></div>
+        <span class="val">0.807</span>
+      </div>
+      <div class="bar-row">
+        <span class="name">baseline*&nbsp;F1</span>
+        <div class="bar-track"><div class="bar-fill base" data-w="38.6"></div></div>
+        <span class="val">0.386</span>
+      </div>
+      <div class="bars-legend">
+        <span><i style="background:var(--brass-bright)"></i> fine-tuned (staleguard)</span>
+        <span><i style="background:var(--rivet)"></i> *roberta-large-mnli baseline, macro F1</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INSTALL / USAGE -->
+<section id="install" class="wrap">
+  <p class="eyebrow reveal">Get started</p>
+  <h2 class="section-title reveal">Install, run, gate CI, wire into agents</h2>
+  <p class="section-lead reveal">The default build gives you Layer&nbsp;1 — the deterministic, zero-false-positive core that needs no models. Add the <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">ml</code> feature for Layers&nbsp;2–3.</p>
+
+  <div class="tabs reveal">
+    <button class="tab active" data-tab="t-install">Install</button>
+    <button class="tab" data-tab="t-ml">Layers 2–3 (ML)</button>
+    <button class="tab" data-tab="t-ci">CI gate</button>
+    <button class="tab" data-tab="t-agent">Agents / MCP</button>
+  </div>
+
+  <div class="panel active" id="t-install">
+    <p class="lead">Homebrew, an install script, or from source — all give you the deterministic core. Then run <code>check</code> on the full repo.</p>
+    <div class="code-block">
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">shell</span><button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard
+staleguard check">COPY</button></div>
+      <pre><span class="cm"># Homebrew (macOS / Linux)</span>
+<span class="sigil">$ </span><span class="cmd">brew install</span> Arthur920/tap/staleguard
+
+<span class="cm"># or from source</span>
+<span class="sigil">$ </span><span class="cmd">cargo install</span> <span class="flag">--git</span> https://github.com/Arthur920/Staleguard
+
+<span class="sigil">$ </span><span class="cmd">staleguard check</span>                 <span class="cm"># full repo, Layer 1</span></pre>
+    </div>
+  </div>
+
+  <div class="panel" id="t-ml">
+    <p class="lead">Layers 2–3 run local ONNX models behind the <code>ml</code> feature (prebuilt binaries omit it — the deps are large). Both routes compile from source, then fetch models at runtime.</p>
+    <div class="code-block">
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">shell</span><button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard-ml
+staleguard setup
+staleguard check --layer 3">COPY</button></div>
+      <pre><span class="cm"># Homebrew — compiles with the ml feature</span>
+<span class="sigil">$ </span><span class="cmd">brew install</span> Arthur920/tap/staleguard-ml
+
+<span class="cm"># or with cargo</span>
+<span class="sigil">$ </span><span class="cmd">cargo install</span> <span class="flag">--git</span> https://github.com/Arthur920/Staleguard <span class="flag">--features</span> ml
+
+<span class="sigil">$ </span><span class="cmd">staleguard setup</span>                 <span class="cm"># fetch + load every model, offline thereafter</span>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--layer</span> 3       <span class="cm"># all three layers</span></pre>
+    </div>
+  </div>
+
+  <div class="panel" id="t-ci">
+    <p class="lead"><code>staleguard check</code> exits non-zero on any finding or a score regression — a drop-in for any pipeline. Commit a baseline on main, then gate PRs against it.</p>
+    <div class="code-block">
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">.github/workflows</span><button class="copy-btn" data-copy="staleguard check --write-ledger
+staleguard check --fail-on-regression --format json">COPY</button></div>
+      <pre><span class="cm"># once, on the base branch — records the alignment baseline</span>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--write-ledger</span>
+
+<span class="cm"># in CI on each PR — fail only if alignment regressed</span>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--fail-on-regression</span> <span class="flag">--format</span> json</pre>
+    </div>
+  </div>
+
+  <div class="panel" id="t-agent">
+    <p class="lead">Staleguard speaks <code>--format json</code>, so any coding agent can run it and read findings back — directly via shell, or exposed as an MCP <code>check_doc_drift</code> tool.</p>
+    <div class="code-block">
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">agent</span><button class="copy-btn" data-copy="staleguard check --format json --diff main">COPY</button></div>
+      <pre><span class="cm"># let the agent call it directly</span>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--format</span> json <span class="flag">--diff</span> main
+
+<span class="cm"># a good standing instruction in CLAUDE.md:</span>
+<span class="cm">#   "After editing code or docs, run staleguard check</span>
+<span class="cm">#    --format json and fix any reported drift."</span></pre>
+    </div>
+  </div>
+
+  <h3 style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:600;margin-top:64px;letter-spacing:.03em" class="reveal">Environment overrides</h3>
+  <table class="env-table reveal">
+    <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td>STALEGUARD_NLI_REPO</td><td>NLI judge model repo (default <code style="color:var(--blade);font-family:'JetBrains Mono',monospace;font-size:.85em">Arthur920/staleguard</code>)</td></tr>
+      <tr><td>STALEGUARD_NLI_THRESHOLD<br>STALEGUARD_NLI_MARGIN</td><td>decision thresholds — how far contradiction must out-score entailment</td></tr>
+      <tr><td>STALEGUARD_NLI_MAX_CLAIMS</td><td>per-run claim budget (default 300; <code style="color:var(--blade);font-family:'JetBrains Mono',monospace;font-size:.85em">0</code> = no cap)</td></tr>
+      <tr><td>STALEGUARD_EMBED_REPO</td><td>Layer 2 embedding model</td></tr>
+      <tr><td>STALEGUARD_RERANK_REPO</td><td>optional reranker</td></tr>
+      <tr><td>STALEGUARD_ORT_THREADS</td><td>ONNX intra-op threads (default: all cores)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-brand">
+          <img src="staleguard.png" alt="Staleguard shield">
+          <span>Staleguard</span>
+        </div>
+        <p class="footer-note">A heavily AI-assisted personal project — the architecture, layer design, evaluation, and the call on what was good enough to keep are mine; the deterministic core is built to be auditable precisely because generated code shouldn't be taken on faith.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/Arthur920/Staleguard" target="_blank" rel="noopener">GitHub ↗</a>
+        <a href="https://github.com/Arthur920/Staleguard/blob/main/DETAILS.md" target="_blank" rel="noopener">Full details ↗</a>
+        <a href="https://huggingface.co/Arthur920/staleguard" target="_blank" rel="noopener">Model on Hugging Face ↗</a>
+        <a href="https://github.com/Arthur920/Staleguard/releases" target="_blank" rel="noopener">Releases ↗</a>
+      </div>
+    </div>
+    <div class="footer-base">STALEGUARD · CATCH DOCUMENTATION DRIFT · FULLY LOCAL &amp; OFFLINE</div>
+  </div>
+</footer>
+
+<script>
+  // nav shadow on scroll
+  const nav = document.getElementById('nav');
+  addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 24), { passive: true });
+
+  // copy buttons
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        const old = btn.textContent;
+        btn.textContent = 'COPIED'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1400);
+      } catch (e) {}
+    });
+  });
+
+  // tabs
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  // reveal on scroll
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('in');
+        if (e.target.id === 'bars') {
+          e.target.querySelectorAll('.bar-fill').forEach(f => f.style.width = f.dataset.w + '%');
+        }
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.18 });
+  document.querySelectorAll('.reveal, .stagger').forEach(el => io.observe(el));
+
+  // fire hero stagger on load
+  addEventListener('load', () => {
+    document.querySelectorAll('.hero .stagger').forEach(el => el.classList.add('in'));
+  });
+</script>
+</body>
+</html>
