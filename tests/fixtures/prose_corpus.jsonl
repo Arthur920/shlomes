@@ -1,0 +1,235 @@
+// Layer-1 prose-rule evaluation corpus. One JSON object per line; blank lines
+// and `//` comments are ignored. Each case is a single sentence of doc prose
+// plus the module set it would be grounded against and the GOLD set of rules a
+// perfect extractor should produce (empty = the sentence is not an enforceable
+// architecture rule and must NOT extract anything).
+//
+// Curated + generated from the patterns observed in the 2026-06-16 50-repo
+// markdown scan. The un-backticked ("bare") cases are weighted at least as
+// heavily as backticked ones because real docs rarely backtick module operands.
+// The generator that seeds the bulk lives at tools/gen_prose_corpus.py; hand
+// edits to individual lines are fine — the harness in rules.rs re-derives gold
+// only from this file and gates on a zero-false-positive contract.
+//
+// gold kinds: forbid_edge{from,to} | forbid_reach{from,to} |
+//             layer{module,allowed[]} | forbid_symbol{symbol,except[]}
+// === GENERATED: backticked direct edges (forbid_edge_re) ===
+{"text": "`cli` must not import `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_edge", "from": "cli", "to": "app.core"}], "tag": "gen-edge-0"}
+{"text": "`controllers` layer should not imports `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_edge", "from": "controllers", "to": "parser"}], "tag": "gen-edge-1"}
+{"text": "`handlers` module may not depend on `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_edge", "from": "handlers", "to": "http_client"}], "tag": "gen-edge-2"}
+{"text": "`models` package can not depends on `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_edge", "from": "models", "to": "renderer"}], "tag": "gen-edge-3"}
+{"text": "`transport` crate cannot access `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_edge", "from": "transport", "to": "gateway"}], "tag": "gen-edge-4"}
+{"text": "`x` component can't accesses `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_edge", "from": "x", "to": "usecase"}], "tag": "gen-edge-5"}
+{"text": "`adapter` does not touch `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_edge", "from": "adapter", "to": "ui"}], "tag": "gen-edge-6"}
+{"text": "`api` layer do not touches `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "data_access"}], "tag": "gen-edge-7"}
+{"text": "`payments` module must not import `service`.", "modules": ["payments", "service"], "gold": [{"kind": "forbid_edge", "from": "payments", "to": "service"}], "tag": "gen-edge-8"}
+{"text": "`worker` package should not imports `queue`.", "modules": ["worker", "queue"], "gold": [{"kind": "forbid_edge", "from": "worker", "to": "queue"}], "tag": "gen-edge-9"}
+{"text": "`y` crate may not depend on `presentation`.", "modules": ["y", "presentation"], "gold": [{"kind": "forbid_edge", "from": "y", "to": "presentation"}], "tag": "gen-edge-10"}
+{"text": "`grpc` component can not depends on `ports`.", "modules": ["grpc", "ports"], "gold": [{"kind": "forbid_edge", "from": "grpc", "to": "ports"}], "tag": "gen-edge-11"}
+{"text": "`cache` cannot access `billing`.", "modules": ["cache", "billing"], "gold": [{"kind": "forbid_edge", "from": "cache", "to": "billing"}], "tag": "gen-edge-12"}
+{"text": "`db` layer can't accesses `metrics`.", "modules": ["db", "metrics"], "gold": [{"kind": "forbid_edge", "from": "db", "to": "metrics"}], "tag": "gen-edge-13"}
+{"text": "`auth` module does not touch `session`.", "modules": ["auth", "session"], "gold": [{"kind": "forbid_edge", "from": "auth", "to": "session"}], "tag": "gen-edge-14"}
+{"text": "`plugins` package do not touches `mod1`.", "modules": ["plugins", "mod1"], "gold": [{"kind": "forbid_edge", "from": "plugins", "to": "mod1"}], "tag": "gen-edge-15"}
+{"text": "`utils` crate must not import `dto`.", "modules": ["utils", "dto"], "gold": [{"kind": "forbid_edge", "from": "utils", "to": "dto"}], "tag": "gen-edge-16"}
+{"text": "`infra` component should not imports `web`.", "modules": ["infra", "web"], "gold": [{"kind": "forbid_edge", "from": "infra", "to": "web"}], "tag": "gen-edge-17"}
+{"text": "`repository` may not depend on `entities`.", "modules": ["repository", "entities"], "gold": [{"kind": "forbid_edge", "from": "repository", "to": "entities"}], "tag": "gen-edge-18"}
+{"text": "`pkg_b` layer can not depends on `tracing`.", "modules": ["pkg_b", "tracing"], "gold": [{"kind": "forbid_edge", "from": "pkg_b", "to": "tracing"}], "tag": "gen-edge-19"}
+{"text": "`persistence` module cannot access `core`.", "modules": ["persistence", "core"], "gold": [{"kind": "forbid_edge", "from": "persistence", "to": "core"}], "tag": "gen-edge-20"}
+{"text": "`crypto` package can't accesses `domain`.", "modules": ["crypto", "domain"], "gold": [{"kind": "forbid_edge", "from": "crypto", "to": "domain"}], "tag": "gen-edge-21"}
+{"text": "`storage` crate does not touch `view-model`.", "modules": ["storage", "view-model"], "gold": [{"kind": "forbid_edge", "from": "storage", "to": "view-model"}], "tag": "gen-edge-22"}
+{"text": "`config` component do not touches `database`.", "modules": ["config", "database"], "gold": [{"kind": "forbid_edge", "from": "config", "to": "database"}], "tag": "gen-edge-23"}
+
+// === GENERATED: backticked never edges (never_edge_re) ===
+{"text": "`cli` never imports `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_edge", "from": "cli", "to": "app.core"}], "tag": "gen-never-0"}
+{"text": "`controllers` never depends on `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_edge", "from": "controllers", "to": "parser"}], "tag": "gen-never-1"}
+{"text": "`handlers` never uses `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_edge", "from": "handlers", "to": "http_client"}], "tag": "gen-never-2"}
+{"text": "`models` never references `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_edge", "from": "models", "to": "renderer"}], "tag": "gen-never-3"}
+{"text": "`transport` never imports `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_edge", "from": "transport", "to": "gateway"}], "tag": "gen-never-4"}
+{"text": "`x` never depends on `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_edge", "from": "x", "to": "usecase"}], "tag": "gen-never-5"}
+{"text": "`adapter` never uses `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_edge", "from": "adapter", "to": "ui"}], "tag": "gen-never-6"}
+{"text": "`api` never references `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "data_access"}], "tag": "gen-never-7"}
+
+// === GENERATED: backticked transitive reach (forbid_reach_re) ===
+{"text": "`cli` must not transitively import `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_reach", "from": "cli", "to": "app.core"}], "tag": "gen-reach-0"}
+{"text": "`controllers` should not transitively depend on `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_reach", "from": "controllers", "to": "parser"}], "tag": "gen-reach-1"}
+{"text": "`handlers` may not indirectly use `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_reach", "from": "handlers", "to": "http_client"}], "tag": "gen-reach-2"}
+{"text": "`models` must not indirectly reference `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_reach", "from": "models", "to": "renderer"}], "tag": "gen-reach-3"}
+{"text": "`transport` should not even transitively reach `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_reach", "from": "transport", "to": "gateway"}], "tag": "gen-reach-4"}
+{"text": "`x` may not reach `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_reach", "from": "x", "to": "usecase"}], "tag": "gen-reach-5"}
+{"text": "`adapter` must not transitively import `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_reach", "from": "adapter", "to": "ui"}], "tag": "gen-reach-6"}
+{"text": "`api` should not transitively depend on `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_reach", "from": "api", "to": "data_access"}], "tag": "gen-reach-7"}
+{"text": "`payments` may not indirectly use `service`.", "modules": ["payments", "service"], "gold": [{"kind": "forbid_reach", "from": "payments", "to": "service"}], "tag": "gen-reach-8"}
+{"text": "`worker` must not indirectly reference `queue`.", "modules": ["worker", "queue"], "gold": [{"kind": "forbid_reach", "from": "worker", "to": "queue"}], "tag": "gen-reach-9"}
+{"text": "`y` should not even transitively reach `presentation`.", "modules": ["y", "presentation"], "gold": [{"kind": "forbid_reach", "from": "y", "to": "presentation"}], "tag": "gen-reach-10"}
+{"text": "`grpc` may not reach `ports`.", "modules": ["grpc", "ports"], "gold": [{"kind": "forbid_reach", "from": "grpc", "to": "ports"}], "tag": "gen-reach-11"}
+
+// === GENERATED: backticked reverse imported-by edges (forbid_by_re) ===
+{"text": "`cli` must not be imported by `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_edge", "from": "app.core", "to": "cli"}], "tag": "gen-by-0"}
+{"text": "`controllers` should not be used from `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_edge", "from": "parser", "to": "controllers"}], "tag": "gen-by-1"}
+{"text": "`handlers` may not be referenced in `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_edge", "from": "http_client", "to": "handlers"}], "tag": "gen-by-2"}
+{"text": "`models` can not be accessed by `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_edge", "from": "renderer", "to": "models"}], "tag": "gen-by-3"}
+{"text": "`transport` must not be depended on from `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_edge", "from": "gateway", "to": "transport"}], "tag": "gen-by-4"}
+{"text": "`x` should not be imported in `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_edge", "from": "usecase", "to": "x"}], "tag": "gen-by-5"}
+{"text": "`adapter` may not be used by `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_edge", "from": "ui", "to": "adapter"}], "tag": "gen-by-6"}
+{"text": "`api` can not be referenced from `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_edge", "from": "data_access", "to": "api"}], "tag": "gen-by-7"}
+{"text": "`payments` must not be accessed in `service`.", "modules": ["payments", "service"], "gold": [{"kind": "forbid_edge", "from": "service", "to": "payments"}], "tag": "gen-by-8"}
+{"text": "`worker` should not be depended on by `queue`.", "modules": ["worker", "queue"], "gold": [{"kind": "forbid_edge", "from": "queue", "to": "worker"}], "tag": "gen-by-9"}
+
+// === GENERATED: backticked symmetric independence (independent_re; two edges) ===
+{"text": "`cli` is independent of `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_edge", "from": "cli", "to": "app.core"}, {"kind": "forbid_edge", "from": "app.core", "to": "cli"}], "tag": "gen-indep-0"}
+{"text": "`controllers` are independent from `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_edge", "from": "controllers", "to": "parser"}, {"kind": "forbid_edge", "from": "parser", "to": "controllers"}], "tag": "gen-indep-1"}
+{"text": "`handlers` stays independent of `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_edge", "from": "handlers", "to": "http_client"}, {"kind": "forbid_edge", "from": "http_client", "to": "handlers"}], "tag": "gen-indep-2"}
+{"text": "`models` remains independent from `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_edge", "from": "models", "to": "renderer"}, {"kind": "forbid_edge", "from": "renderer", "to": "models"}], "tag": "gen-indep-3"}
+{"text": "`transport` is independent of `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_edge", "from": "transport", "to": "gateway"}, {"kind": "forbid_edge", "from": "gateway", "to": "transport"}], "tag": "gen-indep-4"}
+{"text": "`x` are independent from `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_edge", "from": "x", "to": "usecase"}, {"kind": "forbid_edge", "from": "usecase", "to": "x"}], "tag": "gen-indep-5"}
+{"text": "`adapter` stays independent of `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_edge", "from": "adapter", "to": "ui"}, {"kind": "forbid_edge", "from": "ui", "to": "adapter"}], "tag": "gen-indep-6"}
+{"text": "`api` remains independent from `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "data_access"}, {"kind": "forbid_edge", "from": "data_access", "to": "api"}], "tag": "gen-indep-7"}
+
+// === GENERATED: backticked depends-on-nothing layers (depends_nothing_re) ===
+{"text": "`cli` depends on nothing.", "modules": ["cli"], "gold": [{"kind": "layer", "module": "cli", "allowed": []}], "tag": "gen-nothing-0"}
+{"text": "`controllers` imports nothing.", "modules": ["controllers"], "gold": [{"kind": "layer", "module": "controllers", "allowed": []}], "tag": "gen-nothing-1"}
+{"text": "`handlers` has no dependencies.", "modules": ["handlers"], "gold": [{"kind": "layer", "module": "handlers", "allowed": []}], "tag": "gen-nothing-2"}
+{"text": "`models` has no imports.", "modules": ["models"], "gold": [{"kind": "layer", "module": "models", "allowed": []}], "tag": "gen-nothing-3"}
+{"text": "`transport` has no deps.", "modules": ["transport"], "gold": [{"kind": "layer", "module": "transport", "allowed": []}], "tag": "gen-nothing-4"}
+{"text": "`x` depends on nothing.", "modules": ["x"], "gold": [{"kind": "layer", "module": "x", "allowed": []}], "tag": "gen-nothing-5"}
+{"text": "`adapter` imports nothing.", "modules": ["adapter"], "gold": [{"kind": "layer", "module": "adapter", "allowed": []}], "tag": "gen-nothing-6"}
+{"text": "`api` has no dependencies.", "modules": ["api"], "gold": [{"kind": "layer", "module": "api", "allowed": []}], "tag": "gen-nothing-7"}
+{"text": "`payments` has no imports.", "modules": ["payments"], "gold": [{"kind": "layer", "module": "payments", "allowed": []}], "tag": "gen-nothing-8"}
+{"text": "`worker` has no deps.", "modules": ["worker"], "gold": [{"kind": "layer", "module": "worker", "allowed": []}], "tag": "gen-nothing-9"}
+
+// === GENERATED: backticked only-depends layers (only_depends_re) ===
+{"text": "`cli` may only depend on `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "layer", "module": "cli", "allowed": ["app.core"]}], "tag": "gen-only-0"}
+{"text": "`controllers` must only import `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "layer", "module": "controllers", "allowed": ["parser"]}], "tag": "gen-only-1"}
+{"text": "`handlers` can only depends on `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "layer", "module": "handlers", "allowed": ["http_client"]}], "tag": "gen-only-2"}
+{"text": "`models` should only imports `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "layer", "module": "models", "allowed": ["renderer"]}], "tag": "gen-only-3"}
+{"text": "`transport` only depend on `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "layer", "module": "transport", "allowed": ["gateway"]}], "tag": "gen-only-4"}
+{"text": "`x` may only import `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "layer", "module": "x", "allowed": ["usecase"]}], "tag": "gen-only-5"}
+{"text": "`adapter` must only depends on `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "layer", "module": "adapter", "allowed": ["ui"]}], "tag": "gen-only-6"}
+{"text": "`api` can only imports `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "layer", "module": "api", "allowed": ["data_access"]}], "tag": "gen-only-7"}
+{"text": "`app` may only depend on `core`, `utils`, and `config`.", "modules": ["app", "core", "utils", "config"], "gold": [{"kind": "layer", "module": "app", "allowed": ["core", "utils", "config"]}], "tag": "gen-only-multi"}
+{"text": "`web` should only import `api` and `dto`.", "modules": ["web", "api", "dto"], "gold": [{"kind": "layer", "module": "web", "allowed": ["api", "dto"]}], "tag": "gen-only-multi2"}
+
+// === GENERATED: backticked forbidden symbols (forbid_symbol_re) ===
+{"text": "Must not use `eval`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "eval", "except": []}], "tag": "gen-symbol-0"}
+{"text": "Should not call `exec`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "exec", "except": []}], "tag": "gen-symbol-1"}
+{"text": "May not invoke `os.environ`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "os.environ", "except": []}], "tag": "gen-symbol-2"}
+{"text": "Never use `System.exit`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "System.exit", "except": []}], "tag": "gen-symbol-3"}
+{"text": "Never call `println`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "println", "except": []}], "tag": "gen-symbol-4"}
+{"text": "Don't use `unwrap`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "unwrap", "except": []}], "tag": "gen-symbol-5"}
+{"text": "Don't call `panic!`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "panic!", "except": []}], "tag": "gen-symbol-6"}
+{"text": "Must not use `global_state`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "global_state", "except": []}], "tag": "gen-symbol-7"}
+{"text": "Should not call `time.now`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "time.now", "except": []}], "tag": "gen-symbol-8"}
+{"text": "May not invoke `math.random`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "math.random", "except": []}], "tag": "gen-symbol-9"}
+{"text": "No direct `os.environ` outside `config`.", "modules": ["config"], "gold": [{"kind": "forbid_symbol", "symbol": "os.environ", "except": ["config"]}], "tag": "gen-symbol-outside"}
+{"text": "No raw `sql` except in `repository`.", "modules": ["repository"], "gold": [{"kind": "forbid_symbol", "symbol": "sql", "except": ["repository"]}], "tag": "gen-symbol-except"}
+{"text": "No use of `println` outside `logger`.", "modules": ["logger"], "gold": [{"kind": "forbid_symbol", "symbol": "println", "except": ["logger"]}], "tag": "gen-symbol-no-use-of"}
+{"text": "Modules may not reference `singleton`.", "modules": [], "gold": [{"kind": "forbid_symbol", "symbol": "singleton", "except": []}], "tag": "gen-symbol-may-not-ref"}
+
+// === GENERATED: bare-operand direct edges (no backticks; grounding-gated) ===
+{"text": "transport must not import auth.", "modules": ["transport", "auth"], "gold": [{"kind": "forbid_edge", "from": "transport", "to": "auth"}], "tag": "gen-bare-edge-0"}
+{"text": "The domain layer should not imports usecase.", "modules": ["domain", "usecase"], "gold": [{"kind": "forbid_edge", "from": "domain", "to": "usecase"}], "tag": "gen-bare-edge-1"}
+{"text": "presentation module may not depend on storage.", "modules": ["presentation", "storage"], "gold": [{"kind": "forbid_edge", "from": "presentation", "to": "storage"}], "tag": "gen-bare-edge-2"}
+{"text": "The app.core package can not depends on cli.", "modules": ["app.core", "cli"], "gold": [{"kind": "forbid_edge", "from": "app.core", "to": "cli"}], "tag": "gen-bare-edge-3"}
+{"text": "database crate cannot reference db.", "modules": ["database", "db"], "gold": [{"kind": "forbid_edge", "from": "database", "to": "db"}], "tag": "gen-bare-edge-4"}
+{"text": "The utils component can't references pkg_b.", "modules": ["utils", "pkg_b"], "gold": [{"kind": "forbid_edge", "from": "utils", "to": "pkg_b"}], "tag": "gen-bare-edge-5"}
+{"text": "adapter code must not access service.", "modules": ["adapter", "service"], "gold": [{"kind": "forbid_edge", "from": "adapter", "to": "service"}], "tag": "gen-bare-edge-6"}
+{"text": "The persistence library should not accesses crypto.", "modules": ["persistence", "crypto"], "gold": [{"kind": "forbid_edge", "from": "persistence", "to": "crypto"}], "tag": "gen-bare-edge-7"}
+{"text": "plugins may not use dto.", "modules": ["plugins", "dto"], "gold": [{"kind": "forbid_edge", "from": "plugins", "to": "dto"}], "tag": "gen-bare-edge-8"}
+{"text": "The api layer can not uses x.", "modules": ["api", "x"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "x"}], "tag": "gen-bare-edge-9"}
+{"text": "core module cannot import payments.", "modules": ["core", "payments"], "gold": [{"kind": "forbid_edge", "from": "core", "to": "payments"}], "tag": "gen-bare-edge-10"}
+{"text": "The gateway package can't imports worker.", "modules": ["gateway", "worker"], "gold": [{"kind": "forbid_edge", "from": "gateway", "to": "worker"}], "tag": "gen-bare-edge-11"}
+{"text": "controllers crate must not depend on renderer.", "modules": ["controllers", "renderer"], "gold": [{"kind": "forbid_edge", "from": "controllers", "to": "renderer"}], "tag": "gen-bare-edge-12"}
+{"text": "The cache component should not depends on grpc.", "modules": ["cache", "grpc"], "gold": [{"kind": "forbid_edge", "from": "cache", "to": "grpc"}], "tag": "gen-bare-edge-13"}
+{"text": "http_client code may not reference billing.", "modules": ["http_client", "billing"], "gold": [{"kind": "forbid_edge", "from": "http_client", "to": "billing"}], "tag": "gen-bare-edge-14"}
+{"text": "The data_access library can not references queue.", "modules": ["data_access", "queue"], "gold": [{"kind": "forbid_edge", "from": "data_access", "to": "queue"}], "tag": "gen-bare-edge-15"}
+{"text": "scheduler cannot access config.", "modules": ["scheduler", "config"], "gold": [{"kind": "forbid_edge", "from": "scheduler", "to": "config"}], "tag": "gen-bare-edge-16"}
+{"text": "The session layer can't accesses y.", "modules": ["session", "y"], "gold": [{"kind": "forbid_edge", "from": "session", "to": "y"}], "tag": "gen-bare-edge-17"}
+{"text": "metrics module must not use infra.", "modules": ["metrics", "infra"], "gold": [{"kind": "forbid_edge", "from": "metrics", "to": "infra"}], "tag": "gen-bare-edge-18"}
+{"text": "The mod1 package should not uses ui.", "modules": ["mod1", "ui"], "gold": [{"kind": "forbid_edge", "from": "mod1", "to": "ui"}], "tag": "gen-bare-edge-19"}
+{"text": "tracing crate may not import parser.", "modules": ["tracing", "parser"], "gold": [{"kind": "forbid_edge", "from": "tracing", "to": "parser"}], "tag": "gen-bare-edge-20"}
+{"text": "The repository component can not imports handlers.", "modules": ["repository", "handlers"], "gold": [{"kind": "forbid_edge", "from": "repository", "to": "handlers"}], "tag": "gen-bare-edge-21"}
+{"text": "view-model code cannot depend on web.", "modules": ["view-model", "web"], "gold": [{"kind": "forbid_edge", "from": "view-model", "to": "web"}], "tag": "gen-bare-edge-22"}
+{"text": "The models library can't depends on ports.", "modules": ["models", "ports"], "gold": [{"kind": "forbid_edge", "from": "models", "to": "ports"}], "tag": "gen-bare-edge-23"}
+
+// === GENERATED: bare edges with bold / path-style operands ===
+{"text": "The **repository** layer cannot reference **service**.", "modules": ["repository", "service"], "gold": [{"kind": "forbid_edge", "from": "repository", "to": "service"}], "tag": "gen-bare-bold"}
+{"text": "**handlers** must not access **models**.", "modules": ["handlers", "models"], "gold": [{"kind": "forbid_edge", "from": "handlers", "to": "models"}], "tag": "gen-bare-bold-both"}
+{"text": "domain/model must not import infra/db.", "modules": ["domain/model", "infra/db"], "gold": [{"kind": "forbid_edge", "from": "domain/model", "to": "infra/db"}], "tag": "gen-bare-path"}
+{"text": "The Auth module must not depend on Billing.", "modules": ["auth", "billing"], "gold": [{"kind": "forbid_edge", "from": "auth", "to": "billing"}], "tag": "gen-bare-mixedcase"}
+{"text": "src/web should not import src/db.", "modules": ["src/web", "src/db"], "gold": [{"kind": "forbid_edge", "from": "src/web", "to": "src/db"}], "tag": "gen-bare-path2"}
+
+// === GENERATED: bare-operand transitive reach ===
+{"text": "transport must not transitively import auth.", "modules": ["transport", "auth"], "gold": [{"kind": "forbid_reach", "from": "transport", "to": "auth"}], "tag": "gen-bare-reach-0"}
+{"text": "domain should not transitively depend on usecase.", "modules": ["domain", "usecase"], "gold": [{"kind": "forbid_reach", "from": "domain", "to": "usecase"}], "tag": "gen-bare-reach-1"}
+{"text": "presentation may not indirectly use storage.", "modules": ["presentation", "storage"], "gold": [{"kind": "forbid_reach", "from": "presentation", "to": "storage"}], "tag": "gen-bare-reach-2"}
+{"text": "app.core must not indirectly reference cli.", "modules": ["app.core", "cli"], "gold": [{"kind": "forbid_reach", "from": "app.core", "to": "cli"}], "tag": "gen-bare-reach-3"}
+{"text": "database should not reach db.", "modules": ["database", "db"], "gold": [{"kind": "forbid_reach", "from": "database", "to": "db"}], "tag": "gen-bare-reach-4"}
+{"text": "utils may not transitively import pkg_b.", "modules": ["utils", "pkg_b"], "gold": [{"kind": "forbid_reach", "from": "utils", "to": "pkg_b"}], "tag": "gen-bare-reach-5"}
+{"text": "adapter must not transitively depend on service.", "modules": ["adapter", "service"], "gold": [{"kind": "forbid_reach", "from": "adapter", "to": "service"}], "tag": "gen-bare-reach-6"}
+{"text": "persistence should not indirectly use crypto.", "modules": ["persistence", "crypto"], "gold": [{"kind": "forbid_reach", "from": "persistence", "to": "crypto"}], "tag": "gen-bare-reach-7"}
+
+// === known misses: real rules current extractors cannot catch (intended FN) ===
+{"text": "Core internals must not depend on satellite implementation classes.", "modules": ["core", "satellite"], "gold": [{"kind": "forbid_edge", "from": "core", "to": "satellite"}], "tag": "miss-multiword-operand"}
+{"text": "`api` must not import anything from `db`.", "modules": ["api", "db"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "db"}], "tag": "miss-import-anything-from"}
+{"text": "Modules in `api` should not call into `db`.", "modules": ["api", "db"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "db"}], "tag": "miss-call-into"}
+
+// === hard negatives: boilerplate / descriptive prose that must NOT extract ===
+{"text": "High-level modules should not depend on low-level modules.", "modules": [], "gold": [], "tag": "noise-solid"}
+{"text": "Clients SHOULD NOT depend on the transport details.", "modules": ["transport"], "gold": [], "tag": "noise-rfc"}
+{"text": "Untrusted code must not access the kernel.", "modules": [], "gold": [], "tag": "noise-security"}
+{"text": "This module should be easy to test.", "modules": ["testing"], "gold": [], "tag": "noise-generic"}
+{"text": "Users should not have to read the source.", "modules": [], "gold": [], "tag": "noise-prose"}
+{"text": "The README should not reference outdated commands.", "modules": ["readme", "commands"], "gold": [], "tag": "noise-ungrounded-operand"}
+{"text": "Components must not depend on implementation details.", "modules": [], "gold": [], "tag": "noise-stopword-operands"}
+{"text": "Each service should be independently deployable.", "modules": ["service"], "gold": [], "tag": "noise-no-rule"}
+{"text": "The application should not depend on external state.", "modules": [], "gold": [], "tag": "noise-ungrounded-target"}
+{"text": "Avoid circular dependencies between packages.", "modules": [], "gold": [], "tag": "noise-advice"}
+{"text": "It is recommended that `api` not import `db`.", "modules": ["api", "db"], "gold": [], "tag": "noise-no-modal"}
+{"text": "See `api` and `db` for details.", "modules": ["api", "db"], "gold": [], "tag": "noise-stray-backticks"}
+{"text": "`api` imports `db` for serialization.", "modules": ["api", "db"], "gold": [], "tag": "noise-descriptive-import"}
+{"text": "The `db` module is imported by many `api` handlers.", "modules": ["db", "api"], "gold": [], "tag": "noise-descriptive-by"}
+{"text": "`domain` only contains pure functions.", "modules": ["domain"], "gold": [], "tag": "noise-only-contains"}
+{"text": "`config` is independent and reusable.", "modules": ["config"], "gold": [], "tag": "noise-independent-no-target"}
+{"text": "Don't forget to update `db`.", "modules": ["db"], "gold": [], "tag": "noise-dont-forget"}
+{"text": "No more than `3` retries allowed.", "modules": [], "gold": [], "tag": "noise-no-more-than"}
+{"text": "We must not break `api` compatibility.", "modules": ["api"], "gold": [], "tag": "noise-must-not-break"}
+{"text": "The frontend talks to the backend via HTTP.", "modules": ["frontend", "backend"], "gold": [], "tag": "noise-bare-no-verb"}
+{"text": "Avoid using `eval` where possible.", "modules": [], "gold": [], "tag": "noise-avoid-using"}
+{"text": "payments must not import billing.", "modules": [], "gold": [], "tag": "noise-bare-ungrounded"}
+{"text": "core must not depend on core.", "modules": ["core"], "gold": [], "tag": "noise-bare-self-edge"}
+{"text": "Services must not depend on each other.", "modules": ["services"], "gold": [], "tag": "noise-bare-stopword-target"}
+{"text": "The auth module should be well tested.", "modules": ["auth"], "gold": [], "tag": "noise-bare-no-prohibition"}
+{"text": "billing must not leak payments data.", "modules": ["billing", "payments"], "gold": [], "tag": "noise-bare-non-dep-verb"}
+{"text": "Higher layers must not depend on lower layers.", "modules": [], "gold": [], "tag": "noise-bare-solid"}
+{"text": "The system must not crash on startup.", "modules": [], "gold": [], "tag": "noise-bare-non-dep-verb2"}
+{"text": "Functions should not be too long.", "modules": [], "gold": [], "tag": "noise-generic2"}
+{"text": "Prefer composition over inheritance.", "modules": [], "gold": [], "tag": "noise-advice2"}
+{"text": "The `cache` should be invalidated on write.", "modules": ["cache"], "gold": [], "tag": "noise-descriptive-should"}
+{"text": "Nothing should depend on `internal`.", "modules": ["internal"], "gold": [], "tag": "noise-nothing-subject"}
+{"text": "`api` and `web` both import `shared`.", "modules": ["api", "web", "shared"], "gold": [], "tag": "noise-descriptive-multi"}
+
+// === REAL-WORLD: verbatim sentences from public architecture docs ===
+// Sourced (and quoted exactly) from real project documentation, not the
+// generator. These dominate as hard-negatives/known-misses on purpose: real
+// arch prose rarely reduces to a single-token edge, which is the whole reason
+// Layer-1 grounding is conservative. Gold is what a PERFECT single-token
+// extractor should produce; empty gold = the sentence carries no groundable
+// machine-enforceable edge.
+//
+// src: rust-lang/rust-analyzer docs/book/src/contributing/architecture.md
+{"text": "`syntax` crate is completely independent from the rest of rust-analyzer.", "modules": ["syntax"], "gold": [], "tag": "rw-ra-independent-no-target"}
+{"text": "`base-db` doesn't know about file system and file paths.", "modules": ["base-db"], "gold": [], "tag": "rw-ra-doesnt-know"}
+{"text": "`rust-analyzer` is the only crate that knows about LSP and JSON serialization.", "modules": ["rust-analyzer"], "gold": [], "tag": "rw-ra-only-crate"}
+{"text": "core parts of rust-analyzer (`ide`/`hir`) don't interact with the outside world and thus can't fail.", "modules": ["ide", "hir"], "gold": [], "tag": "rw-ra-no-outside-world"}
+{"text": "tests do not depend on any kind of external resources, they are perfectly reproducible.", "modules": [], "gold": [], "tag": "rw-ra-tests-no-external"}
+// src: croz-ltd/klokwrk-project support/.../modulesAndPackages.md
+{"text": "Subdomain modules must not depend on a different subdomain or bounded context.", "modules": [], "gold": [], "tag": "rw-klokwrk-subdomain"}
+{"text": "Domain model must not depend on a different bounded context.", "modules": ["domain"], "gold": [], "tag": "rw-klokwrk-domain-model"}
+{"text": "Circular dependencies between modules are not allowed.", "modules": [], "gold": [], "tag": "rw-klokwrk-circular"}
+{"text": "In general, generic system libraries should not be used from a domain model.", "modules": ["domain"], "gold": [], "tag": "rw-klokwrk-system-libs"}
+// src: android/nowinandroid docs/ModularizationLearningJourney.md
+{"text": "A feature's `api` module should not depend on another feature's `api` or `impl` module.", "modules": ["api", "impl"], "gold": [], "tag": "rw-nia-feature-api"}
+{"text": "A feature's `impl` should only depend on another feature's `api` module.", "modules": ["impl", "api"], "gold": [{"kind": "layer", "module": "impl", "allowed": ["api"]}], "tag": "rw-nia-impl-only-api"}
+{"text": "These modules can depend on other core modules, but they shouldn't depend on feature nor app modules.", "modules": ["core", "app"], "gold": [], "tag": "rw-nia-core-shouldnt"}
+// src: android/nowinandroid docs/ArchitectureLearningJourney.md
+{"text": "Repositories are the public API for other layers, they provide the only way to access the app data.", "modules": ["repositories"], "gold": [], "tag": "rw-nia-repos-public-api"}

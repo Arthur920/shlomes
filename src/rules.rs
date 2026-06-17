@@ -868,7 +868,7 @@ fn forbid_edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:must|should|may|can|cannot|does|do)\s+not\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|access|accesses|touch|touches)\s+(?:the\s+)?`([^`]+)`",
+            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|should|may|can|does|do)\s+not|cannot|can'?t)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|access|accesses|touch|touches)\s+(?:the\s+)?`([^`]+)`",
         )
         .unwrap()
     })
@@ -930,7 +930,7 @@ fn depends_nothing_re() -> &'static Regex {
 fn only_depends_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:must\s+)?only\s+(?:depends?\s+on|imports?)\s+(.*)").unwrap()
+        Regex::new(r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|may|can|should)\s+)?only\s+(?:depends?\s+on|imports?)\s+(.*)").unwrap()
     })
 }
 
@@ -940,7 +940,7 @@ fn forbid_symbol_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?:(?:must|should|may)\s+not\s+(?:use|call|invoke|reference)|don'?t\s+(?:use|call)|never\s+(?:use|call)|no\s+(?:direct|raw)(?:\s+(?:use|usage|calls?|reference)\s+(?:of|to))?|no\s+(?:use|usage|calls?)\s+(?:of|to))\s+`([^`]+)`",
+            r"(?i)(?:(?:must|should|may)\s+not\s+(?:use|call|invoke|reference)|don'?t\s+(?:use|call)|never\s+(?:use|call)|no\s+(?:direct|raw)(?:\s+(?:use|usage|calls?|reference)\s+(?:of|to))?|no\s+(?:use|usage|calls?)\s+(?:of|to))\s+`([^`]+)`",
         )
         .unwrap()
     })
@@ -1526,5 +1526,135 @@ mod tests {
         });
         let f = check(&rules, &idx, &scratch_dir("ambiguous"));
         assert!(f.iter().all(|x| x.verdict != Verdict::Contradicted));
+    }
+
+    // ---- prose-eval harness ------------------------------------------------
+    //
+    // Drives both extractors over a checked-in labeled corpus and reports
+    // precision/recall, gating on the Layer-1 zero-false-positive contract.
+    // This is the measurement substrate for improving prose recall: any change
+    // to the extractors moves the printed numbers, and the asserts ratchet.
+
+    /// Stable comparable key for a compiled rule.
+    fn rule_key(r: &Rule) -> String {
+        match r {
+            Rule::ForbidEdge { from, to } => format!("edge:{from}->{to}"),
+            Rule::ForbidReach { from, to } => format!("reach:{from}->{to}"),
+            Rule::Layer { module, allowed } => {
+                let mut a = allowed.clone();
+                a.sort();
+                format!("layer:{module}:{}", a.join(","))
+            }
+            Rule::ForbidSymbol { symbol, except } => {
+                let mut e = except.clone();
+                e.sort();
+                format!("symbol:{symbol}:{}", e.join(","))
+            }
+        }
+    }
+
+    /// Same key shape, derived from a gold JSON entry in the corpus.
+    fn gold_key(v: &serde_json::Value) -> String {
+        let strs = |k: &str| -> Vec<String> {
+            v[k].as_array()
+                .map(|a| a.iter().map(|s| s.as_str().unwrap().to_string()).collect())
+                .unwrap_or_default()
+        };
+        let s = |k: &str| v[k].as_str().unwrap().to_string();
+        match v["kind"].as_str().unwrap() {
+            "forbid_edge" => format!("edge:{}->{}", s("from"), s("to")),
+            "forbid_reach" => format!("reach:{}->{}", s("from"), s("to")),
+            "layer" => {
+                let mut a = strs("allowed");
+                a.sort();
+                format!("layer:{}:{}", s("module"), a.join(","))
+            }
+            "forbid_symbol" => {
+                let mut e = strs("except");
+                e.sort();
+                format!("symbol:{}:{}", s("symbol"), e.join(","))
+            }
+            other => panic!("unknown gold kind {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prose_corpus_precision_recall() {
+        let corpus = include_str!("../tests/fixtures/prose_corpus.jsonl");
+        let (mut tp, mut fp, mut fn_, mut gold_total) = (0usize, 0usize, 0usize, 0usize);
+        let mut leaks: Vec<String> = Vec::new();
+
+        for (i, raw) in corpus.lines().enumerate() {
+            let raw = raw.trim();
+            if raw.is_empty() || raw.starts_with("//") {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(raw)
+                .unwrap_or_else(|e| panic!("corpus line {}: {e}\n{raw}", i + 1));
+            let text = v["text"].as_str().unwrap();
+            let modules: HashSet<String> = v["modules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m.as_str().unwrap().to_string())
+                .collect();
+            let mut gold: HashSet<String> =
+                v["gold"].as_array().unwrap().iter().map(gold_key).collect();
+            gold_total += gold.len();
+
+            // Mirror main.rs: prose rules first, then bare deduped against them.
+            let mut got: Vec<Rule> = extract_prose_rules(text, "doc.md")
+                .into_iter()
+                .map(|s| s.rule)
+                .collect();
+            let known: HashSet<String> = got.iter().map(rule_key).collect();
+            for s in extract_bare_rules(text, "doc.md", &modules) {
+                if !known.contains(&rule_key(&s.rule)) {
+                    got.push(s.rule);
+                }
+            }
+
+            let got_keys: HashSet<String> = got.iter().map(|r| rule_key(r)).collect();
+            for k in &got_keys {
+                if gold.remove(k) {
+                    tp += 1;
+                } else {
+                    fp += 1;
+                    leaks.push(format!("  line {} [{}]: extracted {k}", i + 1, v["tag"]));
+                }
+            }
+            fn_ += gold.len(); // gold rules left unmatched
+            for k in &gold {
+                eprintln!("  MISS line {} [{}]: {k}", i + 1, v["tag"]);
+            }
+        }
+
+        let precision = if tp + fp == 0 {
+            1.0
+        } else {
+            tp as f64 / (tp + fp) as f64
+        };
+        let recall = if tp + fn_ == 0 {
+            1.0
+        } else {
+            tp as f64 / (tp + fn_) as f64
+        };
+        eprintln!(
+            "prose eval: tp={tp} fp={fp} fn={fn_} gold={gold_total} \
+             precision={precision:.3} recall={recall:.3}"
+        );
+
+        // Zero-FP is the Layer-1 contract — any extracted rule not in gold is a
+        // hard failure, with the offending sentences named.
+        assert!(
+            fp == 0,
+            "precision regression: {fp} false positive(s)\n{}",
+            leaks.join("\n")
+        );
+        // Recall ratchet: never drop below the current measured floor.
+        assert!(
+            recall >= 0.85,
+            "recall regression: {recall:.3} < 0.85 floor (tp={tp} fn={fn_})"
+        );
     }
 }
