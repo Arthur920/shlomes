@@ -784,4 +784,80 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
         let prov = ground_claim("see `nonexistent_thing` here", &index, &modules);
         assert!(prov.is_empty());
     }
+
+    // ---- Layer-3 decision-rule eval harness --------------------------------
+    //
+    // Drives `decide` over a checked-in labeled corpus of NLI score
+    // distributions and reports a confusion matrix. This measures the verdict
+    // POLICY (the rule that turns model scores into reported drift) without the
+    // 121 MB model, so it runs in normal CI. A *false contradiction* — a verdict
+    // of Contradicted where gold is not — is a wrongly-reported drift finding,
+    // the Layer-3 analog of the Layer-1 zero-false-positive contract, and is a
+    // hard failure here. Overall accuracy is ratcheted. Tuning threshold/margin
+    // moves these numbers, so this is the substrate for that trade-off.
+
+    fn verdict_from_gold(s: &str) -> Verdict {
+        match s {
+            "contradicted" => Verdict::Contradicted,
+            "supported" => Verdict::Supported,
+            "unverifiable" => Verdict::Unverifiable,
+            other => panic!("unknown gold verdict {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nli_decision_corpus_accuracy_and_zero_false_contradictions() {
+        let corpus = include_str!("../tests/fixtures/nli_decision_corpus.jsonl");
+        let (mut correct, mut total) = (0usize, 0usize);
+        let mut false_contras: Vec<String> = Vec::new();
+
+        for (i, raw) in corpus.lines().enumerate() {
+            let raw = raw.trim();
+            if raw.is_empty() || raw.starts_with("//") {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(raw)
+                .unwrap_or_else(|e| panic!("corpus line {}: {e}\n{raw}", i + 1));
+            let chunks: Vec<[f32; 3]> = v["chunks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| {
+                    let a = c.as_array().unwrap();
+                    [
+                        a[0].as_f64().unwrap() as f32,
+                        a[1].as_f64().unwrap() as f32,
+                        a[2].as_f64().unwrap() as f32,
+                    ]
+                })
+                .collect();
+            let gold = verdict_from_gold(v["gold"].as_str().unwrap());
+            let tag = v["tag"].as_str().unwrap_or("?");
+
+            let (got, _) = decide(&chunks, DEFAULT_THRESHOLD, DEFAULT_MARGIN);
+            total += 1;
+            if got == gold {
+                correct += 1;
+            } else {
+                eprintln!("  MISS line {} [{tag}]: gold {gold:?} got {got:?}", i + 1);
+            }
+            // A false contradiction is the cardinal Layer-3 sin.
+            if got == Verdict::Contradicted && gold != Verdict::Contradicted {
+                false_contras.push(format!("  line {} [{tag}]: gold {gold:?}", i + 1));
+            }
+        }
+
+        let accuracy = correct as f64 / total as f64;
+        eprintln!("nli decision eval: correct={correct}/{total} accuracy={accuracy:.3}");
+
+        assert!(
+            false_contras.is_empty(),
+            "false contradiction(s) — wrongly-reported drift:\n{}",
+            false_contras.join("\n")
+        );
+        assert!(
+            accuracy >= 0.95,
+            "decision-rule accuracy regression: {accuracy:.3} < 0.95 floor ({correct}/{total})"
+        );
+    }
 }

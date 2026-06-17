@@ -1,0 +1,54 @@
+// Layer-3 decision-rule evaluation corpus. One JSON object per line; blank lines
+// and `//` comments are ignored. Each case is a list of per-chunk NLI score
+// vectors `[contra, entail, neutral]` (one per retrieved evidence chunk, exactly
+// what `classify_batch` returns) plus the GOLD verdict the `decide` policy should
+// render over them. This measures the verdict POLICY — the rule that turns model
+// scores into reported drift — independent of the model itself, so it runs in
+// normal CI with no 121 MB download.
+//
+// The contradiction axis is the whole reason Layer 3 exists, and a *false*
+// contradiction is a wrongly-reported drift finding — the Layer-3 analog of the
+// Layer-1 zero-false-positive contract. The harness in judge.rs gates on zero
+// false contradictions and ratchets overall accuracy.
+//
+// gold: contradicted | supported | unverifiable
+// Decided at the shipped defaults: threshold=0.5, margin=0.15.
+
+// --- clear supported: a chunk entails well past threshold ---
+{"chunks": [[0.05, 0.92, 0.03]], "gold": "supported", "tag": "clean-entail"}
+{"chunks": [[0.10, 0.70, 0.20], [0.05, 0.88, 0.07]], "gold": "supported", "tag": "best-chunk-entails"}
+{"chunks": [[0.20, 0.55, 0.25]], "gold": "supported", "tag": "entail-just-over-threshold"}
+
+// --- clear contradicted: contradiction dominates its chunk and clears threshold ---
+{"chunks": [[0.85, 0.10, 0.05]], "gold": "contradicted", "tag": "clean-contra"}
+{"chunks": [[0.62, 0.20, 0.18]], "gold": "contradicted", "tag": "contra-just-over-threshold"}
+{"chunks": [[0.10, 0.30, 0.60], [0.78, 0.15, 0.07]], "gold": "contradicted", "tag": "one-strong-contra-chunk"}
+
+// --- OOD smear: text-NLI fed code scatters near-equal mass; must NOT contradict ---
+{"chunks": [[0.48, 0.40, 0.12]], "gold": "unverifiable", "tag": "smear-contra-below-margin"}
+{"chunks": [[0.55, 0.45, 0.00]], "gold": "unverifiable", "tag": "smear-contra-within-margin"}
+{"chunks": [[0.45, 0.40, 0.15]], "gold": "unverifiable", "tag": "smear-neither-clears-threshold"}
+
+// --- per-chunk dominance: a noisy contra chunk that is, on balance, more entailing ---
+{"chunks": [[0.60, 0.55, 0.00], [0.05, 0.80, 0.15]], "gold": "supported", "tag": "noisy-contra-but-entail-wins"}
+{"chunks": [[0.52, 0.46, 0.02]], "gold": "unverifiable", "tag": "contra-edge-not-dominant"}
+
+// --- contra dominant within chunk but loses to a stronger entail elsewhere ---
+{"chunks": [[0.70, 0.10, 0.20], [0.05, 0.95, 0.00]], "gold": "supported", "tag": "entail-outweighs-qualified-contra"}
+
+// --- below threshold everywhere: nothing is confident enough to report ---
+{"chunks": [[0.30, 0.35, 0.35]], "gold": "unverifiable", "tag": "all-weak"}
+{"chunks": [[0.10, 0.20, 0.70]], "gold": "unverifiable", "tag": "neutral-dominates"}
+{"chunks": [[0.40, 0.30, 0.30], [0.20, 0.45, 0.35]], "gold": "unverifiable", "tag": "nothing-clears-threshold"}
+
+// --- no evidence retrieved at all ---
+{"chunks": [], "gold": "unverifiable", "tag": "empty-evidence"}
+
+// --- realistic multi-chunk supported: most chunks neutral, one entails ---
+{"chunks": [[0.15, 0.25, 0.60], [0.10, 0.20, 0.70], [0.08, 0.86, 0.06]], "gold": "supported", "tag": "needle-entail-among-neutral"}
+
+// --- realistic multi-chunk contradicted: neutral chunks plus one dominant contra ---
+{"chunks": [[0.12, 0.30, 0.58], [0.20, 0.25, 0.55], [0.80, 0.12, 0.08]], "gold": "contradicted", "tag": "needle-contra-among-neutral"}
+
+// --- contra dominant but exactly at margin boundary (0.15) — still qualifies ---
+{"chunks": [[0.65, 0.50, 0.00]], "gold": "contradicted", "tag": "contra-exactly-at-margin"}

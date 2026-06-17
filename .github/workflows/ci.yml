@@ -32,10 +32,12 @@ jobs:
       - name: Test
         run: cargo test
 
-      # The ml feature pulls heavy ONNX deps; type-check it without downloading
-      # models or running the model-backed tests.
-      - name: Build (ml feature)
-        run: cargo build --features ml
+      # The ml feature pulls heavy ONNX deps. Run its tests too — they are
+      # model-free (the Layer-3 decision-rule eval, label/softmax/grounding
+      # units), so they exercise Layer 2-3 logic without downloading the 121 MB
+      # model. Any model-backed end-to-end checks are #[ignore]d and skipped.
+      - name: Test (ml feature)
+        run: cargo test --features ml
 
   doc-coherence:
     name: staleguard self-check (Layer 1)

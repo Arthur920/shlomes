@@ -168,7 +168,7 @@
 {"text": "adapter must not transitively depend on service.", "modules": ["adapter", "service"], "gold": [{"kind": "forbid_reach", "from": "adapter", "to": "service"}], "tag": "gen-bare-reach-6"}
 {"text": "persistence should not indirectly use crypto.", "modules": ["persistence", "crypto"], "gold": [{"kind": "forbid_reach", "from": "persistence", "to": "crypto"}], "tag": "gen-bare-reach-7"}
 
-// === known misses: real rules current extractors cannot catch (intended FN) ===
+// === formerly-missed phrasings now covered: multi-word operands, "import anything from", "call into" ===
 {"text": "Core internals must not depend on satellite implementation classes.", "modules": ["core", "satellite"], "gold": [{"kind": "forbid_edge", "from": "core", "to": "satellite"}], "tag": "miss-multiword-operand"}
 {"text": "`api` must not import anything from `db`.", "modules": ["api", "db"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "db"}], "tag": "miss-import-anything-from"}
 {"text": "Modules in `api` should not call into `db`.", "modules": ["api", "db"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "db"}], "tag": "miss-call-into"}
@@ -233,3 +233,29 @@
 {"text": "These modules can depend on other core modules, but they shouldn't depend on feature nor app modules.", "modules": ["core", "app"], "gold": [], "tag": "rw-nia-core-shouldnt"}
 // src: android/nowinandroid docs/ArchitectureLearningJourney.md
 {"text": "Repositories are the public API for other layers, they provide the only way to access the app data.", "modules": ["repositories"], "gold": [], "tag": "rw-nia-repos-public-api"}
+
+// === ADVERSARIAL: realistic positives that must still extract ===
+{"text": "The `domain` package must not import from `infrastructure`.", "modules": ["domain", "infrastructure"], "gold": [{"kind": "forbid_edge", "from": "domain", "to": "infrastructure"}], "tag": "adv-import-from"}
+{"text": "`ui` must never reference `persistence` directly.", "modules": ["ui", "persistence"], "gold": [{"kind": "forbid_edge", "from": "ui", "to": "persistence"}], "tag": "adv-never-trailing-adverb"}
+{"text": "Code in `web` must not call into `core`.", "modules": ["web", "core"], "gold": [{"kind": "forbid_edge", "from": "web", "to": "core"}], "tag": "adv-prefix-call-into"}
+{"text": "`handlers` cannot depend on `repository`.", "modules": ["handlers", "repository"], "gold": [{"kind": "forbid_edge", "from": "handlers", "to": "repository"}], "tag": "adv-cannot"}
+{"text": "`api` should not import `db`, but the test harness may.", "modules": ["api", "db"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "db"}], "tag": "adv-rule-with-trailing-clause"}
+{"text": "auth must not depend on logging.", "modules": ["auth", "logging"], "gold": [{"kind": "forbid_edge", "from": "auth", "to": "logging"}], "tag": "adv-bare-grounded"}
+{"text": "The orders module must not depend on the shipping module.", "modules": ["orders", "shipping"], "gold": [{"kind": "forbid_edge", "from": "orders", "to": "shipping"}], "tag": "adv-bare-module-noun"}
+
+// === ADVERSARIAL: precision probes — look rule-like but must NOT extract ===
+{"text": "Historically, `api` did not import `db`.", "modules": ["api", "db"], "gold": [], "tag": "noise-past-tense"}
+{"text": "Why must `api` not import `db`?", "modules": ["api", "db"], "gold": [], "tag": "noise-question-word-order"}
+{"text": "`api` may import `db` when serialization is needed.", "modules": ["api", "db"], "gold": [], "tag": "noise-permission"}
+{"text": "It's fine for `api` to import `db`.", "modules": ["api", "db"], "gold": [], "tag": "noise-allowed"}
+{"text": "`api` must continue to import `db`.", "modules": ["api", "db"], "gold": [], "tag": "noise-must-continue"}
+{"text": "Make sure `web` does not break when `core` changes.", "modules": ["web", "core"], "gold": [], "tag": "noise-non-dep-verb"}
+{"text": "The presentation layer must not depend on the data layer.", "modules": ["presentation"], "gold": [], "tag": "noise-data-stopword-target"}
+{"text": "Service A must not depend on Service B.", "modules": [], "gold": [], "tag": "noise-bare-ungrounded"}
+{"text": "The `feature` modules must not depend on other `feature` modules.", "modules": ["feature"], "gold": [], "tag": "noise-self-edge-backticked"}
+{"text": "`frontend` should talk to `backend` only through the gateway.", "modules": ["frontend", "backend", "gateway"], "gold": [], "tag": "noise-talk-through"}
+
+// === ADVERSARIAL: genuine recall misses — real rules current single-token extractors cannot ground (intended FN) ===
+{"text": "The `auth` service must not call the `billing` service.", "modules": ["auth", "billing"], "gold": [{"kind": "forbid_edge", "from": "auth", "to": "billing"}], "tag": "miss-call-the-verb"}
+{"text": "`web` must not communicate with `db` directly.", "modules": ["web", "db"], "gold": [{"kind": "forbid_edge", "from": "web", "to": "db"}], "tag": "miss-communicate-with"}
+{"text": "Anything under `cli` must not reach back into `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_reach", "from": "cli", "to": "app.core"}], "tag": "miss-reach-back-into"}

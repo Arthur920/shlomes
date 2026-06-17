@@ -868,7 +868,7 @@ fn forbid_edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|should|may|can|does|do)\s+not|cannot|can'?t)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|access|accesses|touch|touches)\s+(?:the\s+)?`([^`]+)`",
+            r"(?:(?:modules?|code|files?|classes|components?|anything)\s+(?:in|under|within)\s+)?`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|should|may|can|does|do)\s+not|cannot|can'?t)\s+(?:imports?\s+(?:anything\s+)?from|import|imports|depend\s+on|depends\s+on|use|uses|reference|references|access|accesses|touch|touches|calls?\s+into)\s+(?:the\s+)?`([^`]+)`",
         )
         .unwrap()
     })
@@ -878,7 +878,7 @@ fn never_edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+never\s+(?:imports?|depends?\s+on|uses?|references?)\s+(?:the\s+)?`([^`]+)`",
+            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|should|may|can)\s+)?never\s+(?:imports?|depends?\s+on|uses?|references?)\s+(?:the\s+)?`([^`]+)`",
         )
         .unwrap()
     })
@@ -954,7 +954,7 @@ fn bare_edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:import|imports|depend\s+on|depends\s+on|reference|references|access|accesses|use|uses)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
+            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library|internals?|implementations?|classes))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:import|imports|depend\s+on|depends\s+on|reference|references|access|accesses|use|uses)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
         )
         .unwrap()
     })
@@ -966,7 +966,7 @@ fn bare_reach_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:(?:even\s+)?(?:transitively|indirectly)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|reach|reaches)|reach|reaches)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
+            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library|internals?|implementations?|classes))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:(?:even\s+)?(?:transitively|indirectly)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|reach|reaches)|reach|reaches)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
         )
         .unwrap()
     })
@@ -1614,7 +1614,7 @@ mod tests {
                 }
             }
 
-            let got_keys: HashSet<String> = got.iter().map(|r| rule_key(r)).collect();
+            let got_keys: HashSet<String> = got.iter().map(rule_key).collect();
             for k in &got_keys {
                 if gold.remove(k) {
                     tp += 1;
@@ -1653,8 +1653,8 @@ mod tests {
         );
         // Recall ratchet: never drop below the current measured floor.
         assert!(
-            recall >= 0.85,
-            "recall regression: {recall:.3} < 0.85 floor (tp={tp} fn={fn_})"
+            recall >= 0.90,
+            "recall regression: {recall:.3} < 0.90 floor (tp={tp} fn={fn_})"
         );
     }
 }
