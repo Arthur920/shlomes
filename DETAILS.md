@@ -117,7 +117,14 @@ capped run is ~45s; uncapped scales linearly with claim count.
 ## Status
 
 - **Layers 1–2** are the stable core and what most runs should rely on. Layer 1
-  is deterministic and tuned to under-report rather than false-alarm.
+  is deterministic and tuned to under-report rather than false-alarm. Layer 2 —
+  the feeder that decides what code each claim is judged against — is measured by
+  a recall harness (`layer2_recall_*` in `src/evidence.rs`): on a labelled
+  fixture corpus the model-free default (grounding + lexical fallback) lands
+  **recall@5 0.90** with its one miss a deliberately low-overlap paraphrase, and
+  the optional embedding retriever (`STALEGUARD_EMBED_RETRIEVE`) recovers that
+  miss for **recall@5 1.00**. The model-free harness runs in normal CI as a
+  regression gate; the embedding one is `#[ignore]`d (loads the ~160 MB model).
 - **Layer 3** (the NLI judge) is newer. The default model,
   [`staleguard`](https://huggingface.co/Arthur920/staleguard),
   is a `microsoft/unixcoder-base` fine-tune trained specifically for this
