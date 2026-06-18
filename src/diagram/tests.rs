@@ -147,6 +147,77 @@ fn phantom_edge_grounds_through_extension() {
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
+// ---- fuzzy grounding ------------------------------------------------------
+
+#[test]
+fn fuzzy_box_is_not_stale() {
+    // `services/auth` has module-intent (a path separator) and does not ground
+    // exactly, but its significant token {auth} fuzzy-resolves to src/auth → so it
+    // must NOT read stale. This is fuzzy's whole job: broaden grounding in the
+    // *safe* direction (fewer stale findings), never invent edges.
+    let index = idx(&[], &["src/auth"]);
+    let md = mermaid("graph TD\n  p[services/auth]");
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
+    assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
+}
+
+#[test]
+fn conceptual_box_does_not_drive_a_phantom() {
+    // "Auth Service" fuzzy-resolves to src/auth, but a fuzzy endpoint must NOT
+    // produce a phantom edge — conceptual/behavioral arrows are not import claims
+    // (the novu `agent → store` "TodoWrite tap" false positive from the wild audit).
+    let index = idx(&[], &["src/auth", "src/web"]);
+    let md = mermaid("graph TD\n  a[Auth Service] --> w[Web Module]");
+    assert!(
+        check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(),
+        "{:?}",
+        check(&md, "doc.md", &index, std::path::Path::new("."))
+    );
+}
+
+#[test]
+fn ambiguous_segment_label_does_not_cascade() {
+    // The novu cascade: a short box `auth` segment-matches every `…/auth/…`
+    // module, so missing-arrow reported imports among unrelated subtrees. An
+    // ambiguous label must drive neither phantom nor missing-arrow.
+    let index = idx(
+        &[("src/web/auth/login", "src/web/auth/token")],
+        &["src/web/auth/login", "src/web/auth/token", "src/api/auth/keys"],
+    );
+    let md = mermaid("graph TD\n  a[auth] --> b[other]");
+    assert!(
+        check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(),
+        "{:?}",
+        check(&md, "doc.md", &index, std::path::Path::new("."))
+    );
+}
+
+#[test]
+fn missing_arrow_is_exact_unique_only() {
+    // Both modules drawn but only via *fuzzy* conceptual labels → missing-arrow
+    // must NOT fire, since abstract diagrams omit edges on purpose.
+    let index = idx(&[("src/auth", "src/billing")], &["src/auth", "src/billing"]);
+    let md = mermaid("graph TD\n  a[Auth Service]\n  b[Billing System]");
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
+    assert!(
+        f.iter().all(|x| x.verdict != Verdict::Undocumented),
+        "fuzzy boxes must not trigger missing-arrow: {f:?}"
+    );
+}
+
+#[test]
+fn lone_generic_token_does_not_fuzzy_ground() {
+    // "DB" is len-2 → not significant → no fuzzy match → box reads as external,
+    // not stale (no path separator) and not a phantom endpoint.
+    let index = idx(&[], &["src/database"]);
+    let md = mermaid("graph TD\n  d[DB]");
+    assert!(
+        check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(),
+        "{:?}",
+        check(&md, "doc.md", &index, std::path::Path::new("."))
+    );
+}
+
 // ---- parsers --------------------------------------------------------------
 
 #[test]

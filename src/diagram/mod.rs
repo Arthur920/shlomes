@@ -12,6 +12,7 @@ mod align;
 mod class;
 mod dot;
 mod er;
+mod ground;
 mod mermaid;
 mod plantuml;
 mod sequence;
@@ -25,7 +26,9 @@ use walkdir::WalkDir;
 use crate::claim::Provenance;
 use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
-use crate::rules::{grounded, matches};
+use crate::rules::matches;
+
+use ground::{ground_label, module_token_index, resolve, Resolution};
 
 /// The shape of a parsed diagram. Only the graph-shaped kinds are diffable at
 /// Layer 1; the rest are parsed to `None` by their format parser and skipped.
@@ -233,15 +236,27 @@ fn real_edge(index: &CodeIndex, from: &str, to: &str) -> bool {
 /// gated by grounding, so external boxes (`User`, `DB`, `Browser`) are ignored.
 fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Finding> {
     let mut out = Vec::new();
+    let module_tokens = module_token_index(modules);
+    let res = |label: &str| resolve(label, modules, &module_tokens);
 
-    // 1. Phantom edges — drawn, both endpoints real, but no real import.
+    // Resolve every node label once (exact or fuzzy).
+    let node_res: Vec<(&str, Resolution)> = d
+        .nodes
+        .iter()
+        .map(|n| (n.label.as_str(), res(&n.label)))
+        .collect();
+
+    // 1. Phantom edges — drawn, both endpoints name exactly one real module, but
+    //    no real import connects them. Exact-unique only: a fuzzily- or ambiguously-
+    //    grounded endpoint can't carry an assertion about a specific edge without
+    //    risking false positives (the wild audit's conceptual/segment-match arrows).
     for e in &d.edges {
         let from = d.text(&e.from);
         let to = d.text(&e.to);
-        let (gfrom, gto) = (ground_label(&from), ground_label(&to));
-        if !grounded(gfrom, modules) || !grounded(gto, modules) {
-            continue; // an endpoint is an external/undocumented box → skip
-        }
+        let (rfrom, rto) = (res(&from), res(&to));
+        let (Some(gfrom), Some(gto)) = (rfrom.exact_module(), rto.exact_module()) else {
+            continue; // an endpoint is external/undocumented/ambiguous → skip
+        };
         let exists = real_edge(index, gfrom, gto) || (!e.directed && real_edge(index, gto, gfrom));
         let prov = Provenance::modules([from.clone(), to.clone()]);
         if exists {
@@ -267,13 +282,13 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
         }
     }
 
-    // 2. Stale boxes — a box that clearly names a code module that is gone.
-    for n in &d.nodes {
-        let text = &n.label;
-        let g = ground_label(text);
-        if grounded(g, modules) {
-            continue;
+    // 2. Stale boxes — a box that clearly names a code module that is gone. Fuzzy
+    //    resolution only *reduces* this set (more boxes ground), so it stays safe.
+    for (text, resolution) in &node_res {
+        if resolution.grounds() {
+            continue; // names real code (exact, fuzzy, or ambiguous) → not stale
         }
+        let g = ground_label(text);
         if module_intent(g) {
             out.push(Finding::problem(
                 Verdict::Stale,
@@ -290,16 +305,16 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     // 3. Missing arrows — a real import between two boxes that are *both* already
     //    drawn, yet no edge connects them. Bounded to depicted modules, so it
     //    never fires for components the author chose to omit.
+    //    Exact-unique only: fuzzy/ambiguous boxes must not invent "you forgot an
+    //    edge", since abstract diagrams omit edges intentionally (highest-FP class).
     let mut seen = HashSet::new();
     for me in &index.module_edges {
-        let from_drawn = d.nodes.iter().any(|n| {
-            let g = ground_label(&n.label);
-            grounded(g, modules) && matches(&me.from_module, g)
-        });
-        let to_drawn = d.nodes.iter().any(|n| {
-            let g = ground_label(&n.label);
-            grounded(g, modules) && matches(&me.to_module, g)
-        });
+        let from_drawn = node_res
+            .iter()
+            .any(|(_, r)| r.exact_module().is_some_and(|g| matches(&me.from_module, g)));
+        let to_drawn = node_res
+            .iter()
+            .any(|(_, r)| r.exact_module().is_some_and(|g| matches(&me.to_module, g)));
         if !from_drawn || !to_drawn {
             continue;
         }
@@ -332,22 +347,6 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     }
 
     out
-}
-
-/// Strip a trailing source-file extension from a diagram box label. The code
-/// index stores modules extension-stripped (`foo/bar`), but authors routinely
-/// draw boxes as `foo/bar.ts` or `auth.py`; without this, a box that names a
-/// real file fails to ground and is wrongly reported stale.
-fn ground_label(label: &str) -> &str {
-    const EXTS: &[&str] = &[
-        ".rs", ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".java",
-    ];
-    for ext in EXTS {
-        if let Some(stripped) = label.strip_suffix(ext) {
-            return stripped;
-        }
-    }
-    label
 }
 
 /// True if a box label unambiguously denotes a code module *path* (so an

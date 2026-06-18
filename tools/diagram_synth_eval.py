@@ -125,6 +125,53 @@ def main():
         verdicts = dict(collections.Counter(f["verdict"] for f in probs))
         print(f"[{'OK (silent)' if ok else 'FALSE POSITIVE'}] {name}: {desc} -> {verdicts or 'silent'}")
 
+    # ----- fuzzy grounding: conceptual labels never drive edge findings --------
+    # Real diagrams label boxes conceptually ("Align", not "src/diagram/align").
+    # Fuzzy grounding only *suppresses* stale-box findings; it must NEVER drive a
+    # phantom or missing-arrow (conceptual/behavioral arrows aren't import claims —
+    # the novu wild-audit false positives). So a Title-cased conceptual phantom
+    # pair must stay silent, and an ambiguous segment label must stay silent.
+    print("\n--- fuzzy grounding (conceptual labels stay silent for edges) ---")
+    # Count modules that contain a given path component, approximating the Rust
+    # token overlap: a segment is unambiguous iff exactly one module carries it.
+    def norm(seg):  # mirror the Rust token normalization (lowercase + singular)
+        s = seg.lower()
+        return s[:-1] if len(s) > 3 and s.endswith("s") and not s.endswith("ss") else s
+
+    comp_count = collections.Counter(norm(c) for m in mods for c in m.split("/"))
+    fuzzy_nodes = [n for n in nodes if comp_count[norm(n.rsplit("/", 1)[-1])] == 1]
+    concept = {n: n.rsplit("/", 1)[-1].replace("_", " ").title() for n in fuzzy_nodes}
+
+    # A drawn edge between two conceptually-labelled boxes (no real import) must
+    # NOT produce a phantom — conceptual labels are fuzzy and fuzzy can't drive edges.
+    fuzzy_phantom = next(((a, b) for a in fuzzy_nodes for b in fuzzy_nodes
+                          if a != b and (a, b) not in edges and (b, a) not in edges), None)
+    if fuzzy_phantom and concept[fuzzy_phantom[0]] != concept[fuzzy_phantom[1]]:
+        labels = [concept[fuzzy_phantom[0]], concept[fuzzy_phantom[1]]]
+        md = mermaid(labels, [(labels[0], labels[1])])
+        probs = problems(run_on(md))
+        ok = not probs
+        failures += not ok
+        verdicts = dict(collections.Counter(f["verdict"] for f in probs))
+        print(f"[{'OK (silent)' if ok else 'FALSE POSITIVE'}] conceptual phantom "
+              f"({labels[0]!r}->{labels[1]!r}) -> {verdicts or 'silent'}")
+    else:
+        print("[skip] no distinct conceptual phantom pair in this subgraph")
+
+    # Ambiguity probe: a label whose token is shared by >=2 modules must be silent.
+    shared = next((seg for seg, c in comp_count.items()
+                   if c >= 2 and len(seg) >= 3 and seg not in mods), None)
+    # `shared` is already normalized; re-derive a representative original spelling.
+    if shared:
+        probs = problems(run_on(mermaid([shared.title()], [])))
+        ok = not probs
+        failures += not ok
+        verdicts = dict(collections.Counter(f["verdict"] for f in probs))
+        print(f"[{'OK (silent)' if ok else 'FALSE POSITIVE'}] ambiguous label "
+              f"{shared.title()!r} (in {comp_count[shared]} modules) -> {verdicts or 'silent'}")
+    else:
+        print("[skip] no shared segment to probe ambiguity")
+
     print(f"\n{'ALL GREEN' if not failures else str(failures) + ' FAILURE(S)'}")
     sys.exit(1 if failures else 0)
 
