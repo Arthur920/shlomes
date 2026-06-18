@@ -1,0 +1,42 @@
+// Layer-1 constant-swap evaluation corpus. One JSON object per line; blank lines
+// and `//` comments are ignored. Each case is a snippet of doc prose plus the
+// code symbols it would be checked against (name + the literal constants in each
+// symbol's body, as `code::facts` would extract them), and the GOLD verdict the
+// detector should reach for that doc line:
+//   "contradicted" — doc names a value that disagrees with the lone code literal
+//   "supported"    — doc names the value the code actually has (ledgered, hidden)
+//   "none"         — detector must stay silent (no claim, ambiguous, or no anchor)
+// The harness gates the Layer-1 zero-false-positive contract: every "none"/"supported"
+// case that yields a Contradicted is a precision leak and fails the build.
+//
+// --- true positives: clear single-literal swaps -------------------------------
+{"tag":"port-swap","text":"The `port` defaults to 8080 unless overridden.","symbols":[{"name":"port","constants":["5432"]}],"expect":"contradicted"}
+{"tag":"timeout-swap","text":"`timeout` is set to 30 by default.","symbols":[{"name":"timeout","constants":["60"]}],"expect":"contradicted"}
+{"tag":"retries-eq","text":"`retries` = 3","symbols":[{"name":"retries","constants":["5"]}],"expect":"contradicted"}
+{"tag":"default-affix","text":"`port` defaults to 8080.","symbols":[{"name":"DEFAULT_PORT","constants":["5432"]}],"expect":"contradicted"}
+{"tag":"bare-screaming","text":"MAX_RETRIES defaults to 5 across the client.","symbols":[{"name":"MAX_RETRIES","constants":["3"]}],"expect":"contradicted"}
+{"tag":"bare-camel","text":"maxConns is set to 100 at startup.","symbols":[{"name":"maxConns","constants":["64"]}],"expect":"contradicted"}
+{"tag":"bool-swap","text":"`verbose` is true by default.","symbols":[{"name":"verbose","constants":["false"]}],"expect":"contradicted"}
+{"tag":"underscore-suffix","text":"`limit` defaults to 9999.","symbols":[{"name":"limit","constants":["10_000usize"]}],"expect":"contradicted"}
+{"tag":"backticked-value","text":"`workers` defaults to `8`.","symbols":[{"name":"workers","constants":["4"]}],"expect":"contradicted"}
+{"tag":"negative-int","text":"`offset` defaults to -1.","symbols":[{"name":"offset","constants":["0"]}],"expect":"contradicted"}
+//
+// --- supported: doc agrees with code (must NOT be reported as a problem) -------
+{"tag":"agree-port","text":"The `port` defaults to 5432.","symbols":[{"name":"port","constants":["5432"]}],"expect":"supported"}
+{"tag":"agree-suffix","text":"`limit` defaults to 10000.","symbols":[{"name":"limit","constants":["10_000usize"]}],"expect":"supported"}
+{"tag":"agree-bool","text":"`verbose` is false by default.","symbols":[{"name":"verbose","constants":["false"]}],"expect":"supported"}
+{"tag":"agree-among-many","text":"`port` defaults to 8080.","symbols":[{"name":"port","constants":["8080","443"]}],"expect":"supported"}
+//
+// --- true negatives: detector must stay silent (precision traps) --------------
+{"tag":"no-such-symbol","text":"`port` defaults to 8080.","symbols":[{"name":"timeout","constants":["30"]}],"expect":"none"}
+{"tag":"ambiguous-two-literals","text":"`port` defaults to 1234.","symbols":[{"name":"port","constants":["5432","8080"]}],"expect":"none"}
+{"tag":"no-literal-of-kind","text":"`port` defaults to 9090.","symbols":[{"name":"port","constants":["\"8080\""]}],"expect":"none"}
+{"tag":"no-constants","text":"`flush` defaults to 16.","symbols":[{"name":"flush","constants":[]}],"expect":"none"}
+{"tag":"configurable-no-value","text":"The `port` is configurable.","symbols":[{"name":"port","constants":["5432"]}],"expect":"none"}
+{"tag":"bare-english-word","text":"The report defaults to 5 lines of context.","symbols":[{"name":"report","constants":["3"]}],"expect":"none"}
+{"tag":"bare-pascal-word","text":"Default behaviour is 1 retry only.","symbols":[{"name":"Default","constants":["3"]}],"expect":"none"}
+{"tag":"prose-number-no-anchor","text":"Most runs finish in under 2 seconds on a 330k-line repo.","symbols":[{"name":"port","constants":["5432"]}],"expect":"none"}
+{"tag":"float-skipped","text":"`ratio` defaults to 0.5.","symbols":[{"name":"ratio","constants":["0.9"]}],"expect":"none"}
+{"tag":"string-claim-not-parsed","text":"`mode` defaults to fast and stays there.","symbols":[{"name":"mode","constants":["\"slow\""]}],"expect":"none"}
+{"tag":"bool-vs-int","text":"`verbose` defaults to 0.","symbols":[{"name":"verbose","constants":["true"]}],"expect":"none"}
+{"tag":"version-prose","text":"Recent Homebrew versions prompt to trust taps since 4.2.","symbols":[{"name":"version","constants":["1"]}],"expect":"none"}
