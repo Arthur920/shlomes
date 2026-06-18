@@ -4,6 +4,14 @@
 
 # Staleguard
 
+<p align="center">
+  <a href="https://github.com/Arthur920/Staleguard/actions/workflows/ci.yml"><img src="https://github.com/Arthur920/Staleguard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Arthur920/Staleguard/releases"><img src="https://img.shields.io/github/v/release/Arthur920/Staleguard?sort=semver&color=blue" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Arthur920/Staleguard?color=green" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/rust-2021-orange?logo=rust" alt="Rust 2021">
+  <img src="https://img.shields.io/badge/analyzes-Rust%20%7C%20Python%20%7C%20JS%20%7C%20TS%20%7C%20Java-informational" alt="Languages analyzed">
+</p>
+
 Catch **documentation drift** — places where your READMEs, `CLAUDE.md`, and
 `*.md` docs claim something the code no longer backs up. Staleguard checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
