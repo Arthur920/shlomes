@@ -102,6 +102,51 @@ fn omitted_module_does_not_trigger_missing_arrow() {
     assert!(check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty());
 }
 
+// ---- label grounding: regressions from the 10-repo wild audit -------------
+
+#[test]
+fn box_label_with_source_extension_grounds() {
+    // Wild FP (novu): `pipeline/runner.ts` is drawn but the module is stored
+    // extension-stripped as `pipeline/runner`, so the box must NOT read stale.
+    let index = idx(&[], &["src/commands/wizard/pipeline/runner"]);
+    let md = mermaid("graph TD\n  d[pipeline/runner.ts]");
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
+    assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
+}
+
+#[test]
+fn url_route_box_is_not_a_stale_module() {
+    // Wild FP (fastapi): REST route boxes in a request-flow diagram.
+    let index = idx(&[], &["src/api"]);
+    let md = mermaid("graph TD\n  a[/items/public/] --> b[/users/{user_id}]");
+    assert!(
+        check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(),
+        "{:?}",
+        check(&md, "doc.md", &index, std::path::Path::new("."))
+    );
+}
+
+#[test]
+fn decision_node_label_is_not_a_stale_module() {
+    // Wild FP (airflow): Mermaid decision-node label with `<br/>` and `=`.
+    let index = idx(&[], &["src/api"]);
+    let md = mermaid("graph TD\n  a[full_tests_needed=False<br/>is_canary_run=True]");
+    assert!(
+        check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(),
+        "{:?}",
+        check(&md, "doc.md", &index, std::path::Path::new("."))
+    );
+}
+
+#[test]
+fn phantom_edge_grounds_through_extension() {
+    // Both endpoints drawn with `.ts`; the import is real → clean, not phantom.
+    let index = idx(&[("src/a", "src/b")], &["src/a", "src/b"]);
+    let md = mermaid("graph TD\n  x[src/a.ts] --> y[src/b.ts]");
+    let f = check(&md, "doc.md", &index, std::path::Path::new("."));
+    assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
+}
+
 // ---- parsers --------------------------------------------------------------
 
 #[test]

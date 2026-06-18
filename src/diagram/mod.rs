@@ -238,10 +238,11 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     for e in &d.edges {
         let from = d.text(&e.from);
         let to = d.text(&e.to);
-        if !grounded(&from, modules) || !grounded(&to, modules) {
+        let (gfrom, gto) = (ground_label(&from), ground_label(&to));
+        if !grounded(gfrom, modules) || !grounded(gto, modules) {
             continue; // an endpoint is an external/undocumented box → skip
         }
-        let exists = real_edge(index, &from, &to) || (!e.directed && real_edge(index, &to, &from));
+        let exists = real_edge(index, gfrom, gto) || (!e.directed && real_edge(index, gto, gfrom));
         let prov = Provenance::modules([from.clone(), to.clone()]);
         if exists {
             out.push(Finding::supported(
@@ -269,10 +270,11 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     // 2. Stale boxes — a box that clearly names a code module that is gone.
     for n in &d.nodes {
         let text = &n.label;
-        if grounded(text, modules) {
+        let g = ground_label(text);
+        if grounded(g, modules) {
             continue;
         }
-        if module_intent(text) {
+        if module_intent(g) {
             out.push(Finding::problem(
                 Verdict::Stale,
                 format!("diagram box `{text}`"),
@@ -290,20 +292,20 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     //    never fires for components the author chose to omit.
     let mut seen = HashSet::new();
     for me in &index.module_edges {
-        let from_drawn = d
-            .nodes
-            .iter()
-            .any(|n| grounded(&n.label, modules) && matches(&me.from_module, &n.label));
-        let to_drawn = d
-            .nodes
-            .iter()
-            .any(|n| grounded(&n.label, modules) && matches(&me.to_module, &n.label));
+        let from_drawn = d.nodes.iter().any(|n| {
+            let g = ground_label(&n.label);
+            grounded(g, modules) && matches(&me.from_module, g)
+        });
+        let to_drawn = d.nodes.iter().any(|n| {
+            let g = ground_label(&n.label);
+            grounded(g, modules) && matches(&me.to_module, g)
+        });
         if !from_drawn || !to_drawn {
             continue;
         }
         let drawn = d.edges.iter().any(|e| {
-            let ft = d.text(&e.from);
-            let tt = d.text(&e.to);
+            let ft = ground_label(&d.text(&e.from)).to_string();
+            let tt = ground_label(&d.text(&e.to)).to_string();
             (matches(&me.from_module, &ft) && matches(&me.to_module, &tt))
                 || (!e.directed && matches(&me.from_module, &tt) && matches(&me.to_module, &ft))
         });
@@ -332,15 +334,45 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     out
 }
 
+/// Strip a trailing source-file extension from a diagram box label. The code
+/// index stores modules extension-stripped (`foo/bar`), but authors routinely
+/// draw boxes as `foo/bar.ts` or `auth.py`; without this, a box that names a
+/// real file fails to ground and is wrongly reported stale.
+fn ground_label(label: &str) -> &str {
+    const EXTS: &[&str] = &[
+        ".rs", ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".java",
+    ];
+    for ext in EXTS {
+        if let Some(stripped) = label.strip_suffix(ext) {
+            return stripped;
+        }
+    }
+    label
+}
+
 /// True if a box label unambiguously denotes a code module *path* (so an
 /// ungrounded one is a stale reference, not a conceptual box). Deliberately
-/// conservative — only a path separator counts. A bare word like `User`, `DB`,
-/// or a renamed single-segment module is left alone to keep Layer 1 zero-FP.
+/// conservative — only a clean path/namespace token with a separator counts.
+/// A bare word (`User`, `DB`), a URL route (`/items/public/`), a decision-node
+/// label (`needed=False<br/>ok`), or call syntax is left alone to keep Layer 1
+/// zero-FP. Pass the [`ground_label`]-normalized text so a trailing `.ts`/`.py`
+/// doesn't read as a path dot.
 fn module_intent(text: &str) -> bool {
-    if text.chars().any(char::is_whitespace) {
+    if text.is_empty() || text.chars().any(char::is_whitespace) {
         return false;
     }
-    text.contains('/') || text.contains("::") || text.contains('.')
+    // URL routes / fragments are not code module paths.
+    if text.starts_with('/') || text.contains("://") {
+        return false;
+    }
+    // Markup, decision-node labels, call/query syntax — none belong in a path.
+    if text.contains([
+        '=', '<', '>', '{', '}', '(', ')', '\\', '?', '#', '&', '"', '\'',
+    ]) {
+        return false;
+    }
+    // What remains must carry a path or namespace separator.
+    text.contains('/') || text.contains("::")
 }
 
 #[cfg(test)]
