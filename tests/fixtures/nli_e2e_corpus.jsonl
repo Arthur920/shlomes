@@ -1,0 +1,47 @@
+// Layer-3 END-TO-END evaluation corpus. One JSON object per line; blank lines and
+// `//` comments are ignored. Unlike nli_decision_corpus.jsonl (which feeds synthetic
+// score vectors to the `decide` policy), this corpus drives the REAL model: each case
+// is a doc `claim` plus the `evidence` code chunks it is judged against, and the GOLD
+// verdict the loaded NLI cross-encoder + decision policy should render together.
+//
+// This is the only check that measures the shipped model's actual contradiction
+// behaviour. It needs the 121 MB model, so its harness is #[ignore]d and runs on
+// demand (locally / pre-release), not in normal CI:
+//     cargo test --features ml e2e -- --ignored --nocapture
+//
+// The numbers it prints (contradiction precision/recall, overall accuracy) are the
+// measured-not-asserted backing for the "advisory" claim in DETAILS.md, and the
+// regression signal when the model is retrained. A *false contradiction* (Contradicted
+// where gold is not) is the cardinal Layer-3 sin — the analog of the Layer-1 zero-FP
+// contract — and the harness gates on it.
+//
+// claim    : the doc proposition under test (what candidate_claims would emit)
+// evidence : retrieved code chunks fed as the NLI premise (what Layer 2 would return)
+// gold     : contradicted | supported | unverifiable
+// Judged at the shipped defaults: threshold=0.5, margin=0.15.
+
+// --- supported: the code plainly does what the claim says ---
+{"claim": "The `retry` helper retries up to three times before giving up.", "evidence": ["fn retry<T>(mut op: impl FnMut() -> Result<T>) -> Result<T> {\n    let mut last = None;\n    for _ in 0..3 {\n        match op() {\n            Ok(v) => return Ok(v),\n            Err(e) => last = Some(e),\n        }\n    }\n    Err(last.unwrap())\n}"], "gold": "supported", "tag": "retry-count-matches"}
+{"claim": "`parse_port` returns an error when the value is above 65535.", "evidence": ["fn parse_port(s: &str) -> Result<u16> {\n    let n: u32 = s.parse()?;\n    if n > 65535 {\n        return Err(anyhow!(\"port {n} out of range\"));\n    }\n    Ok(n as u16)\n}"], "gold": "supported", "tag": "port-range-guard"}
+{"claim": "The `cache` evicts the least-recently-used entry when it is full.", "evidence": ["fn insert(&mut self, k: K, v: V) {\n    if self.map.len() >= self.cap {\n        // pop the LRU entry from the back of the queue\n        if let Some(old) = self.order.pop_back() {\n            self.map.remove(&old);\n        }\n    }\n    self.order.push_front(k.clone());\n    self.map.insert(k, v);\n}"], "gold": "supported", "tag": "lru-eviction"}
+{"claim": "`is_admin` returns true only for users whose role is `Admin`.", "evidence": ["pub fn is_admin(u: &User) -> bool {\n    matches!(u.role, Role::Admin)\n}"], "gold": "supported", "tag": "admin-role-check"}
+{"claim": "The `connect` function defaults to port 5432 when none is given.", "evidence": ["pub fn connect(cfg: &Config) -> Result<Conn> {\n    let port = cfg.port.unwrap_or(5432);\n    Conn::open(&cfg.host, port)\n}"], "gold": "supported", "tag": "default-port"}
+{"claim": "`hash_password` uses bcrypt to hash the password before storing it.", "evidence": ["pub fn hash_password(raw: &str) -> Result<String> {\n    bcrypt::hash(raw, bcrypt::DEFAULT_COST).map_err(Into::into)\n}"], "gold": "supported", "tag": "bcrypt-hash"}
+{"claim": "The `flush` method writes buffered records to disk before returning.", "evidence": ["pub fn flush(&mut self) -> io::Result<()> {\n    self.file.write_all(&self.buf)?;\n    self.file.sync_all()?;\n    self.buf.clear();\n    Ok(())\n}"], "gold": "supported", "tag": "flush-writes-disk"}
+{"claim": "`normalize` lowercases the input and trims surrounding whitespace.", "evidence": ["fn normalize(s: &str) -> String {\n    s.trim().to_lowercase()\n}"], "gold": "supported", "tag": "normalize-lower-trim"}
+
+// --- contradicted: the code does the opposite of the claim (negation / wrong constant) ---
+{"claim": "The `retry` helper retries up to five times before giving up.", "evidence": ["fn retry<T>(mut op: impl FnMut() -> Result<T>) -> Result<T> {\n    let mut last = None;\n    for _ in 0..3 {\n        match op() {\n            Ok(v) => return Ok(v),\n            Err(e) => last = Some(e),\n        }\n    }\n    Err(last.unwrap())\n}"], "gold": "contradicted", "tag": "retry-count-wrong"}
+{"claim": "The `connect` function defaults to port 8080 when none is given.", "evidence": ["pub fn connect(cfg: &Config) -> Result<Conn> {\n    let port = cfg.port.unwrap_or(5432);\n    Conn::open(&cfg.host, port)\n}"], "gold": "contradicted", "tag": "default-port-wrong"}
+{"claim": "`is_admin` returns true for every authenticated user.", "evidence": ["pub fn is_admin(u: &User) -> bool {\n    matches!(u.role, Role::Admin)\n}"], "gold": "contradicted", "tag": "admin-overbroad"}
+{"claim": "The `cache` evicts the most-recently-used entry when it is full.", "evidence": ["fn insert(&mut self, k: K, v: V) {\n    if self.map.len() >= self.cap {\n        // pop the LRU entry from the back of the queue\n        if let Some(old) = self.order.pop_back() {\n            self.map.remove(&old);\n        }\n    }\n    self.order.push_front(k.clone());\n    self.map.insert(k, v);\n}"], "gold": "contradicted", "tag": "lru-vs-mru"}
+{"claim": "`hash_password` stores the password in plain text.", "evidence": ["pub fn hash_password(raw: &str) -> Result<String> {\n    bcrypt::hash(raw, bcrypt::DEFAULT_COST).map_err(Into::into)\n}"], "gold": "contradicted", "tag": "plaintext-vs-bcrypt"}
+{"claim": "`parse_port` accepts any value without range checking.", "evidence": ["fn parse_port(s: &str) -> Result<u16> {\n    let n: u32 = s.parse()?;\n    if n > 65535 {\n        return Err(anyhow!(\"port {n} out of range\"));\n    }\n    Ok(n as u16)\n}"], "gold": "contradicted", "tag": "port-no-check-wrong"}
+{"claim": "The `flush` method discards buffered records without writing them.", "evidence": ["pub fn flush(&mut self) -> io::Result<()> {\n    self.file.write_all(&self.buf)?;\n    self.file.sync_all()?;\n    self.buf.clear();\n    Ok(())\n}"], "gold": "contradicted", "tag": "flush-discard-wrong"}
+
+// --- unverifiable: evidence is unrelated or insufficient to rule either way ---
+{"claim": "The `scheduler` runs jobs in priority order.", "evidence": ["fn parse_port(s: &str) -> Result<u16> {\n    let n: u32 = s.parse()?;\n    Ok(n as u16)\n}", "pub fn hash_password(raw: &str) -> Result<String> {\n    bcrypt::hash(raw, bcrypt::DEFAULT_COST).map_err(Into::into)\n}"], "gold": "unverifiable", "tag": "unrelated-evidence"}
+{"claim": "The `Config` struct is loaded from a TOML file at startup.", "evidence": ["pub struct Config {\n    pub host: String,\n    pub port: Option<u16>,\n    pub workers: usize,\n}"], "gold": "unverifiable", "tag": "struct-no-loading-logic"}
+{"claim": "The `metrics` exporter pushes samples to Prometheus every 15 seconds.", "evidence": ["pub fn record(&self, name: &str, value: f64) {\n    self.samples.lock().unwrap().push((name.to_string(), value));\n}"], "gold": "unverifiable", "tag": "no-export-interval-evidence"}
+{"claim": "The `session` token expires after 30 minutes of inactivity.", "evidence": ["pub struct Session {\n    pub id: Uuid,\n    pub user_id: u64,\n    pub created_at: Instant,\n}"], "gold": "unverifiable", "tag": "no-expiry-logic"}
+{"claim": "The `worker` pool resizes itself based on queue depth.", "evidence": ["impl Worker {\n    pub fn new(id: usize) -> Self {\n        Worker { id, busy: false }\n    }\n}"], "gold": "unverifiable", "tag": "no-resize-logic"}

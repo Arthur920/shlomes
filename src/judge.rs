@@ -860,4 +860,227 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
             "decision-rule accuracy regression: {accuracy:.3} < 0.95 floor ({correct}/{total})"
         );
     }
+
+    // ---- Layer-3 END-TO-END eval harness (real model) ----------------------
+    //
+    // Unlike the decision-rule eval above, this drives the *loaded model* over a
+    // labeled (claim, evidence) corpus and reports its actual contradiction
+    // precision/recall. It is a deliberately ADVERSARIAL recall probe: hard
+    // minimal-pair negations and constant swaps (high lexical overlap, opposite
+    // meaning) — the slice cross-encoders are worst at. It is NOT an overall
+    // accuracy benchmark and does not supersede the disjoint-holdout precision
+    // measured at training time; it is the in-tree recall tripwire and the
+    // regression baseline for model work.
+    //
+    // It downloads the 121 MB model, so it is #[ignore]d and runs on demand:
+    //     cargo test --features ml e2e -- --ignored --nocapture
+    //
+    // The floors below are a *measured baseline*, not a target: they lock in the
+    // current model's behaviour on this adversarial slice so a future retrain that
+    // regresses fails loudly, and they sit just under what the model achieves
+    // today. As of the current `Arthur920/staleguard` checkpoint this probe
+    // measures roughly: contradiction recall ~0.14, false contradictions = 1.
+    // Low recall here reflects the hard minimal-pair slice (the model reads
+    // negations with high lexical overlap as supported), NOT the holdout-measured
+    // precision — see the module-level note and DETAILS.md. Raise these floors as
+    // the model gets better at subtle drift.
+
+    #[derive(serde::Deserialize)]
+    struct E2eCase {
+        claim: String,
+        evidence: Vec<String>,
+        gold: String,
+        tag: String,
+    }
+
+    #[test]
+    #[ignore = "downloads the 121 MB NLI model; run with --ignored"]
+    fn nli_e2e_corpus_precision_recall() {
+        let corpus = include_str!("../tests/fixtures/nli_e2e_corpus.jsonl");
+        let mut judge = Judge::load().expect("load NLI model");
+
+        let (mut correct, mut total) = (0usize, 0usize);
+        // Contradiction-class confusion: tp = gold&got contra, fp = false contra,
+        // fn = missed contra.
+        let (mut tp, mut fp, mut fn_) = (0usize, 0usize, 0usize);
+        let mut false_contras: Vec<String> = Vec::new();
+
+        for (i, raw) in corpus.lines().enumerate() {
+            let raw = raw.trim();
+            if raw.is_empty() || raw.starts_with("//") {
+                continue;
+            }
+            let case: E2eCase = serde_json::from_str(raw)
+                .unwrap_or_else(|e| panic!("corpus line {}: {e}\n{raw}", i + 1));
+            let gold = verdict_from_gold(&case.gold);
+
+            let (got, conf) = judge.judge(&case.claim, &case.evidence).expect("judge");
+            total += 1;
+            if got == gold {
+                correct += 1;
+            } else {
+                eprintln!(
+                    "  MISS line {} [{}]: gold {gold:?} got {got:?} (conf {conf:.2})",
+                    i + 1,
+                    case.tag
+                );
+            }
+            match (gold == Verdict::Contradicted, got == Verdict::Contradicted) {
+                (true, true) => tp += 1,
+                (false, true) => {
+                    fp += 1;
+                    false_contras.push(format!("  line {} [{}]: gold {gold:?}", i + 1, case.tag));
+                }
+                (true, false) => fn_ += 1,
+                (false, false) => {}
+            }
+        }
+
+        let accuracy = correct as f64 / total as f64;
+        let precision = if tp + fp == 0 {
+            1.0
+        } else {
+            tp as f64 / (tp + fp) as f64
+        };
+        let recall = if tp + fn_ == 0 {
+            1.0
+        } else {
+            tp as f64 / (tp + fn_) as f64
+        };
+        eprintln!(
+            "nli e2e eval: accuracy={accuracy:.3} ({correct}/{total}) | \
+             contradiction precision={precision:.3} recall={recall:.3} (tp={tp} fp={fp} fn={fn_})"
+        );
+
+        // Baseline floors (see comment above): the goal is fp == 0, but the current
+        // model false-fires once, so the regression gate allows <= 1 and the printed
+        // list names which. Drive this to 0 on the next retrain.
+        assert!(
+            fp <= 1,
+            "false contradictions {fp} > 1 baseline — wrongly-reported drift regressed:\n{}",
+            false_contras.join("\n")
+        );
+        assert!(
+            recall >= 0.10,
+            "contradiction recall {recall:.3} below 0.10 baseline — model went blinder to drift (tp={tp} fn={fn_})"
+        );
+        assert!(
+            accuracy >= 0.50,
+            "e2e accuracy {accuracy:.3} below 0.50 baseline ({correct}/{total})"
+        );
+    }
+
+    // ---- Layer-3 ABILITY benchmark (real model, holdout slice) -------------
+    //
+    // The companion to the adversarial probe above. Drives the loaded model over
+    // a deterministic, class-balanced slice of the CodingNLI repo-disjoint holdout
+    // split — the same generalization-to-unseen-repos data the project's headline
+    // contradiction-precision number was measured on. This is the faithful "what
+    // can the model do" benchmark; the minimal-pair probe is the "where is it
+    // blind" tripwire. Together they bound the model's real ability.
+    //
+    // The sample is NOT vendored: its rows are code snippets harvested from many
+    // third-party OSS repos under mixed licenses, and this repo is public —
+    // redistributing them here would be an attribution/licensing problem. Instead
+    // generate it locally from the (private) training data and point the harness
+    // at it; absent that, the benchmark skips:
+    //     python3 tools/gen_holdout_sample.py --src <CodingNLI>/data/test \
+    //         --out /tmp/nli_holdout_sample.jsonl
+    //     STALEGUARD_NLI_HOLDOUT=/tmp/nli_holdout_sample.jsonl \
+    //         cargo test --features ml holdout -- --ignored --nocapture
+    //
+    // Each row is a single `(premise = code, hypothesis = claim, label)`. The
+    // headline metric is contradiction PRECISION (false contradictions are the
+    // cardinal sin); recall and per-class accuracy are also reported. Floors are a
+    // measured baseline — run once to set them, then ratchet up on retrain.
+
+    #[derive(serde::Deserialize)]
+    struct HoldoutCase {
+        premise: String,
+        hypothesis: String,
+        label: String,
+    }
+
+    fn verdict_from_nli_label(s: &str) -> Verdict {
+        match s {
+            "entailment" => Verdict::Supported,
+            "contradiction" => Verdict::Contradicted,
+            "neutral" => Verdict::Unverifiable,
+            other => panic!("unknown NLI label {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore = "downloads the 121 MB NLI model; run with --ignored"]
+    fn nli_holdout_precision_recall() {
+        let Some(path) = std::env::var_os("STALEGUARD_NLI_HOLDOUT") else {
+            eprintln!(
+                "skipping holdout benchmark: set STALEGUARD_NLI_HOLDOUT to a sample \
+                 generated by tools/gen_holdout_sample.py (not vendored — third-party OSS)"
+            );
+            return;
+        };
+        let corpus = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read holdout sample {path:?}: {e}"));
+        let mut judge = Judge::load().expect("load NLI model");
+
+        let (mut correct, mut total) = (0usize, 0usize);
+        let (mut tp, mut fp, mut fn_) = (0usize, 0usize, 0usize);
+
+        for raw in corpus.lines() {
+            let raw = raw.trim();
+            if raw.is_empty() || raw.starts_with("//") {
+                continue;
+            }
+            let case: HoldoutCase = serde_json::from_str(raw).expect("parse holdout row");
+            let gold = verdict_from_nli_label(&case.label);
+            // One premise per row, mirroring how the model was evaluated.
+            let (got, _) = judge
+                .judge(&case.hypothesis, &[case.premise.clone()])
+                .expect("judge");
+            total += 1;
+            if got == gold {
+                correct += 1;
+            }
+            match (gold == Verdict::Contradicted, got == Verdict::Contradicted) {
+                (true, true) => tp += 1,
+                (false, true) => fp += 1,
+                (true, false) => fn_ += 1,
+                (false, false) => {}
+            }
+        }
+
+        let accuracy = correct as f64 / total as f64;
+        let precision = if tp + fp == 0 {
+            1.0
+        } else {
+            tp as f64 / (tp + fp) as f64
+        };
+        let recall = if tp + fn_ == 0 {
+            1.0
+        } else {
+            tp as f64 / (tp + fn_) as f64
+        };
+        eprintln!(
+            "nli holdout eval (n={total}): accuracy={accuracy:.3} | \
+             contradiction precision={precision:.3} recall={recall:.3} (tp={tp} fp={fp} fn={fn_})"
+        );
+
+        // Headline gate: contradiction precision on unseen repos. Baseline set from
+        // the first measured run — ratchet up as the model improves.
+        // Baselines sit just under the first measured run (this sample and the
+        // model are deterministic): precision 0.894, recall 0.917, accuracy 0.825.
+        assert!(
+            precision >= 0.85,
+            "contradiction precision {precision:.3} below 0.85 baseline (tp={tp} fp={fp})"
+        );
+        assert!(
+            recall >= 0.85,
+            "contradiction recall {recall:.3} below 0.85 baseline (tp={tp} fn={fn_})"
+        );
+        assert!(
+            accuracy >= 0.78,
+            "holdout 3-class accuracy {accuracy:.3} below 0.78 baseline ({correct}/{total})"
+        );
+    }
 }

@@ -124,7 +124,25 @@ capped run is ~45s; uncapped scales linearly with claim count.
   task — code-aware, so real code stays in-distribution as the premise (an
   earlier text-NLI model did not, and produced overconfident false
   contradictions). Treat its verdicts as advisory and review contradictions
-  before acting.
+  before acting. Its ability is measured, not assumed, by two in-tree harnesses
+  (both `#[ignore]`d — they load the 121 MB model — run via
+  `cargo test --features ml holdout -- --ignored` and `... e2e ...`):
+  - **Ability benchmark** — a class-balanced slice of the repo-disjoint holdout
+    split the model was trained against (generated locally by
+    `tools/gen_holdout_sample.py`; not vendored, since the snippets are
+    third-party OSS). On it the model scores **contradiction precision 0.89,
+    recall 0.92, 3-class accuracy 0.83** on code from unseen repos: when it flags
+    drift it is almost always real drift.
+  - **Adversarial probe** — `nli_e2e_corpus.jsonl`, hard *minimal-pair* negations
+    and constant swaps ("defaults to 8080" vs `unwrap_or(5432)`). Here recall is
+    low: the cross-encoder leans on lexical overlap and reads many subtle
+    negations as supported, so Layer 3 under-reports the *closest* paraphrase-level
+    drift.
+
+  Net: a Contradicted verdict is trustworthy; silence is not proof of coherence,
+  especially for one-token logic flips. Treat verdicts as advisory and review
+  contradictions before acting. Both harnesses double as regression baselines for
+  retraining the model.
 
 ## About this project
 
