@@ -19,7 +19,7 @@ use crate::findings::{Finding, Verdict};
 
 /// The valid invocation targets the repo declares, per tool. `None` means "no
 /// manifest for this tool" — claims for it are left unchecked.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Manifests {
     npm_scripts: Option<HashSet<String>>,
     make_targets: Option<HashSet<String>>,

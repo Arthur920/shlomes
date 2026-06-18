@@ -1,5 +1,6 @@
 //! staleguard command-line entry point.
 
+mod check;
 mod claim;
 mod code;
 mod commands;
@@ -16,23 +17,25 @@ mod findings;
 mod git;
 #[cfg(feature = "ml")]
 mod judge;
+mod report;
 #[cfg(feature = "ml")]
 mod rerank;
 #[cfg(feature = "ml")]
 mod retrieve;
 mod rules;
+#[cfg(test)]
+mod testutil;
 mod verify;
 
 use code::CodeIndex;
+use report::Format;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use walkdir::WalkDir;
-
-use crate::findings::Finding;
 
 #[derive(Parser)]
 #[command(
@@ -141,12 +144,6 @@ enum Commands {
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum Format {
-    Text,
-    Json,
-}
-
 pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
     collect_docs_filtered(root, &[])
 }
@@ -253,38 +250,44 @@ fn run_check(
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
 
+    let ctx = check::CheckContext {
+        root,
+        index: &index,
+        grounding: &grounding,
+        code_tokens: &code_tokens,
+        repo_files: &repo_files,
+    };
+    let doc_checks = check::doc_checks();
+
     // Architecture rules: prose-sourced, accumulated per doc, then verified once
     // (the symbol scan walks the whole repo).
     let mut arch_rules: Vec<rules::SourcedRule> = Vec::new();
 
     let mut findings = Vec::new();
-    for doc in collect_docs_filtered(root, doc_filter) {
-        let text = match std::fs::read_to_string(&doc) {
+    for doc_path in collect_docs_filtered(root, doc_filter) {
+        let text = match std::fs::read_to_string(&doc_path) {
             Ok(t) => t,
             Err(_) => continue,
         };
-        let rel = doc
+        let rel = doc_path
             .strip_prefix(root)
-            .unwrap_or(&doc)
+            .unwrap_or(&doc_path)
             .to_string_lossy()
             .to_string();
-        let doc_dir = doc.parent().unwrap_or(root).to_path_buf();
+        let doc_dir = doc_path.parent().unwrap_or(root).to_path_buf();
         let manifests = manifest_cache
             .entry(doc_dir.clone())
-            .or_insert_with(|| commands::Manifests::load_nearest(&doc_dir, root));
-        let claims = extract::extract_path_claims(&text, &rel);
-        findings.extend(verify::check_paths(&claims, root, &repo_files));
-        findings.extend(commands::check(&text, &rel, manifests));
-        findings.extend(config::check(
-            &text,
-            &rel,
-            &code_tokens,
-            manifests.project_bins(),
-        ));
-        findings.extend(entrypoints::check(&text, &rel, &grounding));
-        findings.extend(constswap::check(&text, &rel, &index));
-        findings.extend(diagram::check(&text, &rel, &index, root));
-        arch_rules.extend(rules::extract_prose_rules(&text, &rel));
+            .or_insert_with(|| commands::Manifests::load_nearest(&doc_dir, root))
+            .clone();
+        let doc = check::Doc {
+            rel,
+            text,
+            manifests,
+        };
+        for c in doc_checks {
+            findings.extend(c.check(&doc, &ctx));
+        }
+        arch_rules.extend(rules::extract_prose_rules(&doc.text, &doc.rel));
     }
     findings.extend(rules::check(&arch_rules, &index, root));
 
@@ -348,179 +351,6 @@ fn run_check(
         findings.extend(drift::coupling::check(&history));
     }
     drift::run(findings, &index, root, opts)
-}
-
-fn report(findings: &[Finding], format: Format) {
-    match format {
-        Format::Json => {
-            println!("{}", serde_json::to_string_pretty(findings).unwrap());
-        }
-        Format::Text => {
-            if findings.is_empty() {
-                println!("\u{2713} no coherence issues found");
-                return;
-            }
-            for f in findings {
-                println!("[{}] {}: {}", f.verdict.as_str(), f.doc_path, f.detail);
-            }
-            println!("\n{} finding(s)", findings.len());
-        }
-    }
-}
-
-/// Report a completed drift run: the findings plus the alignment score and the
-/// lineage/regression summary.
-fn report_check(out: &drift::Outcome, format: Format) {
-    match format {
-        Format::Json => {
-            let payload = serde_json::json!({
-                "findings": out.findings,
-                "score": out.score,
-                "carried_forward": out.carried_forward,
-                "total_claims": out.total_claims,
-                "regression": out.regression.map(|(b, h)| serde_json::json!({ "base": b, "head": h })),
-            });
-            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
-        }
-        Format::Text => {
-            report(&out.findings, format);
-            println!(
-                "\nalignment {:.3} | {} claim(s), {} carried forward",
-                out.score.repo, out.total_claims, out.carried_forward
-            );
-            if let Some((base, head)) = out.regression {
-                println!("\u{2717} score regressed: {base:.3} (base) -> {head:.3} (head)");
-            }
-        }
-    }
-}
-
-/// Print the architecture-rule audit: every rule extracted from doc prose, where
-/// it came from, and its status (holds / violated / skipped-ungrounded). This is
-/// the visibility layer over the otherwise-silent prose extractor.
-fn report_rules(rows: &[rules::AuditRow], format: Format) {
-    match format {
-        Format::Json => {
-            let payload: Vec<_> = rows
-                .iter()
-                .map(|r| {
-                    let (status, detail) = match &r.status {
-                        rules::RuleStatus::Holds => ("holds", serde_json::Value::Null),
-                        rules::RuleStatus::Violated(n) => {
-                            ("violated", serde_json::json!({ "violations": n }))
-                        }
-                        rules::RuleStatus::Ungrounded(op) => {
-                            ("ungrounded", serde_json::json!({ "operand": op }))
-                        }
-                    };
-                    serde_json::json!({
-                        "rule": r.rule.describe(),
-                        "origin": r.origin,
-                        "status": status,
-                        "detail": detail,
-                        "experimental": r.origin.ends_with("[bare]"),
-                    })
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
-        }
-        Format::Text => {
-            if rows.is_empty() {
-                println!("no architecture rules extracted from doc prose.");
-                println!(
-                    "(rules must be written with both operands in backticks, e.g. \
-                     \"`api` must not import `db`\".)"
-                );
-                return;
-            }
-            let (mut holds, mut violated, mut ungrounded) = (0, 0, 0);
-            let mut bare = 0;
-            for r in rows {
-                let (mark, note) = match &r.status {
-                    rules::RuleStatus::Holds => {
-                        holds += 1;
-                        ("\u{2713} holds    ", String::new())
-                    }
-                    rules::RuleStatus::Violated(n) => {
-                        violated += 1;
-                        ("\u{2717} VIOLATED ", format!("  ({n} violation(s))"))
-                    }
-                    rules::RuleStatus::Ungrounded(op) => {
-                        ungrounded += 1;
-                        (
-                            "\u{26a0} skipped  ",
-                            format!("  (`{op}` matches no real module)"),
-                        )
-                    }
-                };
-                // Experimental bare-operand rules are flagged so they are never
-                // confused with the enforced (backticked) ones.
-                let tag = if r.origin.ends_with("[bare]") {
-                    bare += 1;
-                    " \u{2248}bare"
-                } else {
-                    ""
-                };
-                println!(
-                    "{}{}  {:<30}{}  [{}]",
-                    mark,
-                    tag,
-                    r.rule.describe(),
-                    note,
-                    r.origin
-                );
-            }
-            println!(
-                "\n{} rule(s): {holds} hold, {violated} violated, {ungrounded} skipped (ungrounded)",
-                rows.len()
-            );
-            if ungrounded > 0 {
-                println!(
-                    "note: skipped rules are not enforced — fix the operand name so it \
-                     matches a real module, or the rule is silently ignored."
-                );
-            }
-            if bare > 0 {
-                println!(
-                    "note: {bare} \u{2248}bare rule(s) were parsed from un-backticked prose \
-                     (experimental, grounded against the module graph). These are shown for \
-                     evaluation and are NOT enforced by `staleguard check`."
-                );
-            }
-        }
-    }
-}
-
-fn report_index(index: &CodeIndex, format: Format) {
-    match format {
-        Format::Json => {
-            println!("{}", serde_json::to_string_pretty(index).unwrap());
-        }
-        Format::Text => {
-            for s in &index.symbols {
-                println!(
-                    "[{:?}/{:?}] {} ({}:{})",
-                    s.kind, s.visibility, s.qualified_name, s.span.path, s.span.start_line
-                );
-            }
-            for e in &index.edges {
-                println!("edge  {} -> {}", e.from_module, e.to_module);
-            }
-            for e in &index.module_edges {
-                println!("mod-edge  {} -> {}", e.from_module, e.to_module);
-            }
-            for r in &index.ref_edges {
-                println!("ref-edge  {} -> {}", r.from_symbol, r.to_symbol);
-            }
-            println!(
-                "\n{} symbol(s), {} edge(s), {} mod-edge(s), {} ref-edge(s)",
-                index.symbols.len(),
-                index.edges.len(),
-                index.module_edges.len(),
-                index.ref_edges.len()
-            );
-        }
-    }
 }
 
 /// `staleguard setup`: ensure every layer is ready to run. Layer 1 is always
@@ -594,7 +424,7 @@ fn main() -> ExitCode {
                 fail_on_regression,
             };
             let out = run_check(&root, &opts, layer, &docs);
-            report_check(&out, format);
+            report::report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {
                 ExitCode::SUCCESS
@@ -605,7 +435,7 @@ fn main() -> ExitCode {
         Commands::Index { path, format } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
             let index = CodeIndex::build(&root);
-            report_index(&index, format);
+            report::report_index(&index, format);
             ExitCode::SUCCESS
         }
         Commands::Rules { path, format } => {
@@ -633,7 +463,7 @@ fn main() -> ExitCode {
             bare.retain(|s| !known.contains(&s.rule));
             sourced.extend(bare);
             let rows = rules::audit(&sourced, &index, &root);
-            report_rules(&rows, format);
+            report::report_rules(&rows, format);
             // A violated rule is real drift; exit non-zero so CI/agents notice.
             let violated = rows
                 .iter()
@@ -647,7 +477,7 @@ fn main() -> ExitCode {
         Commands::Coverage { path, format } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
             let findings = coverage::run(&root);
-            report(&findings, format);
+            report::report(&findings, format);
             if findings.is_empty() {
                 ExitCode::SUCCESS
             } else {

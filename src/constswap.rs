@@ -458,13 +458,9 @@ mod tests {
         let mut leaks: Vec<String> = Vec::new();
         let mut misses: Vec<String> = Vec::new();
 
-        for (i, raw) in corpus.lines().enumerate() {
-            let raw = raw.trim();
-            if raw.is_empty() || raw.starts_with("//") {
-                continue;
-            }
+        for (lineno, raw) in crate::testutil::corpus_rows(corpus) {
             let v: serde_json::Value = serde_json::from_str(raw)
-                .unwrap_or_else(|e| panic!("corpus line {}: {e}\n{raw}", i + 1));
+                .unwrap_or_else(|e| panic!("corpus line {lineno}: {e}\n{raw}"));
             let text = v["text"].as_str().unwrap();
             let tag = v["tag"].as_str().unwrap_or("?");
             let want = v["expect"].as_str().unwrap();
@@ -494,16 +490,16 @@ mod tests {
                         tp += 1;
                     } else {
                         fn_ += 1;
-                        misses.push(format!("  MISS line {} [{tag}]", i + 1));
+                        misses.push(format!("  MISS line {lineno} [{tag}]"));
                     }
                 }
                 "supported" | "none" => {
                     if got_contradiction {
                         fp += 1;
-                        leaks.push(format!("  line {} [{tag}]: false contradiction", i + 1));
+                        leaks.push(format!("  line {lineno} [{tag}]: false contradiction"));
                     }
                 }
-                other => panic!("unknown expect {other:?} on line {}", i + 1),
+                other => panic!("unknown expect {other:?} on line {lineno}"),
             }
         }
 
