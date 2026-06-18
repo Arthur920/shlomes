@@ -16,27 +16,43 @@ Catch **documentation drift** — places where your READMEs, `CLAUDE.md`, and
 `*.md` docs claim something the code no longer backs up. Staleguard checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
 
-Fully local and offline. The deterministic core needs no model and is tuned for
-**zero false positives**.
+Fully local and offline. The core is **deterministic** — no model, no API — and
+tuned for **zero false positives**: every finding points at a concrete path,
+command, symbol, or import edge that the docs got wrong.
 
 **What it catches**, broadly: broken references (paths, commands, env vars,
-flags, code symbols), architecture-rule violations parsed from prose, behavioral
-contradictions, undocumented public surface, stale diagrams, and drift over time
-with a CI alignment score. Full breakdown in [DETAILS.md](DETAILS.md).
+flags, code symbols), architecture-rule violations parsed from prose,
+undocumented public surface, stale diagrams, and drift over time with a CI
+alignment score. Full breakdown in [DETAILS.md](DETAILS.md).
 
-## The three layers
+## How it works
+
+The deterministic core (**Layer 1**) is the tool. It checks docs against the real
+codebase — paths, commands, config keys, entry points, and architecture rules
+parsed from prose versus the actual import graph — and reports only what it can
+prove wrong. It needs no models, runs in ~1.2s on a 330k-line repo, and is what
+every install ships with by default.
 
 ```
  Layer 1 — DETERMINISTIC  (no ML, zero false positives)
    paths exist? commands real? config keys present? architecture rules hold?
- Layer 2 — RETRIEVAL  (local embeddings)
-   for each surviving claim, fetch the most-relevant code chunks
- Layer 3 — VERIFICATION  (local code-aware NLI cross-encoder)
-   (evidence, claim) → supported | contradicted | unverifiable
 ```
 
-Layer 1 is instant and needs nothing. Layers 2–3 run local ONNX models (no API,
-code never leaves the machine) and live behind the `ml` build feature.
+### Experimental ML layers (opt-in)
+
+Behind the `ml` build feature sit two local-ONNX layers that try to catch
+*behavioral* drift the deterministic core can't see — prose like "the cache
+invalidates on write":
+
+```
+ Layer 2 — RETRIEVAL  (local embeddings)        for each claim, fetch relevant code
+ Layer 3 — VERIFICATION  (NLI cross-encoder)    (evidence, claim) → supported | contradicted | unverifiable
+```
+
+These are **experimental and advisory** — treat a `contradicted` verdict as a
+high-precision hint to go look, not a gate. If you just want a dependable check,
+Layer 1 alone is the recommended use. Method and measured numbers for the curious
+are in [DETAILS.md](DETAILS.md#status).
 
 ## Install
 
@@ -64,10 +80,11 @@ which needs no models. Then:
 staleguard check                 # full repo (Layer 1)
 ```
 
-### Layers 2–3 (local ML)
+### Experimental ML layers (Layers 2–3)
 
-Layers 2–3 run local ONNX models and need the `ml` feature, which the prebuilt
-binaries omit (the ONNX + embedding deps are large). Two ways to get an
+Layers 2–3 are opt-in and advisory (see [the eval](DETAILS.md#status) before you
+rely on them). They run local ONNX models and need the `ml` feature, which the
+prebuilt binaries omit (the ONNX + embedding deps are large). Two ways to get an
 ml-enabled build — both compile from source, then fetch models at runtime:
 
 ```bash

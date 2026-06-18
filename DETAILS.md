@@ -23,10 +23,12 @@ the real import graph:
 - forbidden symbols — "no direct `os.environ` outside `config`" (text scan +
   resolved references)
 
-**Behavioral contradictions** — a local NLI cross-encoder (no LLM API) judges
-prose the deterministic layer can't, e.g. "the cache invalidates on write":
+**Behavioral contradictions** *(experimental, `ml` feature)* — a local NLI
+cross-encoder (no LLM API) judges prose the deterministic layer can't, e.g. "the
+cache invalidates on write":
 - verdicts `supported` / `contradicted` / `unverifiable`, each with a confidence
 - claims ground to symbols, so a verdict re-opens when that code changes
+- advisory only: high precision, uneven recall — see [Status](#status)
 
 **Coverage gaps**
 - public code surface that no doc describes, risk-ranked by fan-in, churn, and
@@ -42,23 +44,25 @@ prose the deterministic layer can't, e.g. "the cache invalidates on write":
 - fingerprint staleness: a previously-verified claim is flagged when the code
   behind it changes
 
-## How the layers work
-
-A 3-layer hybrid: each layer is cheaper and higher-signal than escalating to the
-next, so most drift is caught before any model runs.
+**Layer 1 is the product**: it's deterministic, ships in every build, and is
+tuned to under-report rather than false-alarm. Layers 2–3 are an **experimental,
+opt-in ML extension** (the `ml` feature) that tries to reach behavioral drift the
+deterministic core can't — useful, but advisory, and honestly evaluated below.
 
 ```
- Layer 1 — DETERMINISTIC  (no ML, zero false positives)
+ Layer 1 — DETERMINISTIC  (no ML, zero false positives)         ← default, the tool
    paths exist? commands real? config keys present? entry points valid?
    architecture rules from prose vs the import graph → contradicted
- Layer 2 — RETRIEVAL  (local embeddings + optional reranker)
+ Layer 2 — RETRIEVAL  (local embeddings + optional reranker)    ← experimental
    for each surviving claim, fetch the most-relevant code chunks
- Layer 3 — VERIFICATION  (local NLI cross-encoder)
+ Layer 3 — VERIFICATION  (local NLI cross-encoder)              ← experimental
    (evidence, claim) → supported | contradicted | unverifiable
 ```
 
-Underneath sits a **drift ledger** (Layer 0): it makes runs incremental, scores
-alignment, and gates CI on regressions.
+Each layer is cheaper and higher-signal than escalating to the next, so most
+drift is caught before any model runs. Underneath sits a **drift ledger**
+(Layer 0): it makes runs incremental, scores alignment, and gates CI on
+regressions.
 
 ## Commands
 
@@ -116,9 +120,11 @@ capped run is ~45s; uncapped scales linearly with claim count.
 
 ## Status
 
-- **Layers 1–2** are the stable core and what most runs should rely on. Layer 1
-  is deterministic and tuned to under-report rather than false-alarm. Layer 2 —
-  the feeder that decides what code each claim is judged against — is measured by
+- **Layer 1** is the product and what most runs should rely on: deterministic,
+  shipped by default, tuned to under-report rather than false-alarm. The `ml`
+  layers below are opt-in and advisory.
+- **Layer 2** — the retrieval feeder that decides what code each claim is judged
+  against — is the solid half of the ml build. It is measured by
   a recall harness (`layer2_recall_*` in `src/evidence.rs`): on a labelled
   fixture corpus the model-free default (grounding + lexical fallback) lands
   **recall@5 0.90** with its one miss a deliberately low-overlap paraphrase, and
