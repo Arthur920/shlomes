@@ -182,7 +182,11 @@ fn ambiguous_segment_label_does_not_cascade() {
     // ambiguous label must drive neither phantom nor missing-arrow.
     let index = idx(
         &[("src/web/auth/login", "src/web/auth/token")],
-        &["src/web/auth/login", "src/web/auth/token", "src/api/auth/keys"],
+        &[
+            "src/web/auth/login",
+            "src/web/auth/token",
+            "src/api/auth/keys",
+        ],
     );
     let md = mermaid("graph TD\n  a[auth] --> b[other]");
     assert!(

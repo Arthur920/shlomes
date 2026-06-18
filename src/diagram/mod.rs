@@ -309,9 +309,10 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     //    edge", since abstract diagrams omit edges intentionally (highest-FP class).
     let mut seen = HashSet::new();
     for me in &index.module_edges {
-        let from_drawn = node_res
-            .iter()
-            .any(|(_, r)| r.exact_module().is_some_and(|g| matches(&me.from_module, g)));
+        let from_drawn = node_res.iter().any(|(_, r)| {
+            r.exact_module()
+                .is_some_and(|g| matches(&me.from_module, g))
+        });
         let to_drawn = node_res
             .iter()
             .any(|(_, r)| r.exact_module().is_some_and(|g| matches(&me.to_module, g)));

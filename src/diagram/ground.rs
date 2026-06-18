@@ -71,8 +71,20 @@ pub(super) fn ground_label(label: &str) -> &str {
 fn is_stopword(t: &str) -> bool {
     matches!(
         t,
-        "service" | "module" | "component" | "layer" | "bridge" | "client" | "server" | "system"
-            | "the" | "a" | "an" | "of" | "and" | "to"
+        "service"
+            | "module"
+            | "component"
+            | "layer"
+            | "bridge"
+            | "client"
+            | "server"
+            | "system"
+            | "the"
+            | "a"
+            | "an"
+            | "of"
+            | "and"
+            | "to"
     )
 }
 
@@ -115,9 +127,7 @@ fn split_camel(s: &str, out: &mut Vec<String>) {
 pub(super) fn label_tokens(label: &str) -> Vec<String> {
     let g = ground_label(label);
     let mut raw = Vec::new();
-    for part in g.split(|c: char| {
-        c.is_whitespace() || matches!(c, '-' | '_' | '/' | '.' | ':')
-    }) {
+    for part in g.split(|c: char| c.is_whitespace() || matches!(c, '-' | '_' | '/' | '.' | ':')) {
         if !part.is_empty() {
             split_camel(part, &mut raw);
         }
@@ -139,7 +149,11 @@ pub(super) fn module_token_index(modules: &HashSet<String>) -> Vec<(String, Hash
 /// Significant tokens are those long enough to discriminate; a lone generic token
 /// like `db`/`ui` carries no fuzzy weight (it grounds only via the exact tier).
 fn significant(tokens: &[String]) -> Vec<&str> {
-    tokens.iter().filter(|t| t.len() >= 3).map(|s| s.as_str()).collect()
+    tokens
+        .iter()
+        .filter(|t| t.len() >= 3)
+        .map(|s| s.as_str())
+        .collect()
 }
 
 /// Ground a box label: exact tier first, then a unique-and-significant fuzzy tier.
