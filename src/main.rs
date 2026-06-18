@@ -4,6 +4,7 @@ mod claim;
 mod code;
 mod commands;
 mod config;
+mod constswap;
 mod coverage;
 mod diagram;
 mod drift;
@@ -281,6 +282,7 @@ fn run_check(
             manifests.project_bins(),
         ));
         findings.extend(entrypoints::check(&text, &rel, &grounding));
+        findings.extend(constswap::check(&text, &rel, &index));
         findings.extend(diagram::check(&text, &rel, &index, root));
         arch_rules.extend(rules::extract_prose_rules(&text, &rel));
     }
