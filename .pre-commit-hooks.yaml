@@ -1,0 +1,17 @@
+# Pre-commit integration. In a consuming repo, add to .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/Arthur920/Staleguard
+#     rev: v0.2.0
+#     hooks:
+#       - id: staleguard
+#
+# The hook runs the deterministic Layer-1 check whenever a Markdown doc changes.
+# It scans the whole repo (drift is a doc-vs-code question, not a per-file one),
+# but only triggers when a doc is actually touched.
+- id: staleguard
+  name: staleguard (doc drift)
+  description: Check docs against code for coherence drift.
+  entry: staleguard check
+  language: rust
+  files: \.(md|markdown)$
+  pass_filenames: false

@@ -1,0 +1,69 @@
+name: Staleguard
+description: >-
+  Catch documentation drift — fail CI when your READMEs, CLAUDE.md, and docs
+  claim something the code no longer backs up. Deterministic, offline, zero
+  false positives.
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  args:
+    description: >-
+      Extra arguments passed to `staleguard check` (e.g.
+      "--fail-on-regression" or "--doc README.md").
+    required: false
+    default: ""
+  working-directory:
+    description: Directory to run the check in (the repo root to scan).
+    required: false
+    default: "."
+  version:
+    description: >-
+      Staleguard release tag to install (e.g. "v0.2.0"), or "latest".
+    required: false
+    default: latest
+  format:
+    description: >-
+      Output format: "text", "json", or "sarif". With "sarif" the action
+      writes results to `staleguard.sarif` for upload to GitHub code scanning.
+    required: false
+    default: text
+
+outputs:
+  sarif-file:
+    description: Path to the generated SARIF file (only when format is "sarif").
+    value: ${{ steps.run.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Staleguard
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="https://github.com/Arthur920/Staleguard/releases"
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          url="$base/latest/download/staleguard-installer.sh"
+        else
+          url="$base/download/${{ inputs.version }}/staleguard-installer.sh"
+        fi
+        curl --proto '=https' --tlsv1.2 -LsSf "$url" | sh
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+    - name: Run Staleguard
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.format }}" = "sarif" ]; then
+          out="$GITHUB_WORKSPACE/staleguard.sarif"
+          # Tee so the SARIF is saved even though `check` exits non-zero on drift.
+          staleguard check --format sarif ${{ inputs.args }} > "$out" || true
+          echo "sarif-file=$out" >> "$GITHUB_OUTPUT"
+          # Re-run for the gating exit code (cheap; same deterministic pass).
+          staleguard check ${{ inputs.args }}
+        else
+          staleguard check --format ${{ inputs.format }} ${{ inputs.args }}
+        fi

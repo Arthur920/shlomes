@@ -101,6 +101,60 @@ fn check_flags_undocumented_public_symbol() {
 }
 
 #[test]
+fn check_emits_valid_sarif() {
+    let fx = Fixture::new(&[
+        ("lib.rs", "pub fn greet() {}\n"),
+        (
+            "README.md",
+            "# Demo\n\nRun `staleguard frobnicate` first.\n",
+        ),
+    ]);
+    let out = fx.run(&["check", "--format", "sarif"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let sarif: serde_json::Value =
+        serde_json::from_str(&stdout).expect("sarif output is valid JSON");
+    assert_eq!(sarif["version"], "2.1.0");
+    assert_eq!(sarif["runs"][0]["tool"]["driver"]["name"], "Staleguard");
+    // Each result must carry a physical location GitHub can annotate.
+    let results = sarif["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
+    assert!(results
+        .iter()
+        .all(|r| r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"].is_string()));
+}
+
+#[test]
+fn config_excludes_doc_and_suppresses_verdict() {
+    // README has a stale path; LEGACY.md has another. Exclude LEGACY.md and
+    // suppress `undocumented`, so only README's stale finding remains.
+    let fx = Fixture::new(&[
+        ("lib.rs", "pub fn greet() {}\npub fn helper() {}\n"),
+        ("README.md", "# Demo\n\nSee `src/gone.rs` for details.\n"),
+        ("LEGACY.md", "# Old\n\nSee `src/also-gone.rs`.\n"),
+        (
+            ".staleguard.toml",
+            "exclude = [\"LEGACY.md\"]\nsuppress = [\"undocumented\"]\n",
+        ),
+    ]);
+    let out = fx.run(&["check", "--format", "json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("check output is valid JSON");
+    let findings = json["findings"].as_array().expect("findings array");
+    assert!(
+        findings.iter().all(|f| f["verdict"] != "undocumented"),
+        "undocumented findings should be suppressed, got: {stdout}"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["doc_path"].as_str().unwrap_or("").contains("LEGACY")),
+        "excluded doc should produce no findings, got: {stdout}"
+    );
+}
+
+#[test]
 fn check_clean_repo_has_no_findings() {
     // A documented public symbol and nothing undocumented: no drift.
     let fx = Fixture::new(&[

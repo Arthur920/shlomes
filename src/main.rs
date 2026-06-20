@@ -23,6 +23,8 @@ mod rerank;
 #[cfg(feature = "ml")]
 mod retrieve;
 mod rules;
+mod sarif;
+mod settings;
 #[cfg(test)]
 mod testutil;
 mod verify;
@@ -55,6 +57,7 @@ Examples:
   staleguard check                  full repo, deterministic (layer 1)
   staleguard check --diff main      only re-check what changed vs main
   staleguard check --format json    machine-readable findings (exits non-zero on drift)
+  staleguard check --format sarif   SARIF for GitHub code scanning / PR annotations
   staleguard check --write-ledger   set the CI alignment baseline on the base branch
   staleguard index                  print code symbols + module/reference edges
   staleguard rules                  audit architecture rules parsed from doc prose
@@ -90,6 +93,13 @@ enum Commands {
         /// Fail if the alignment score regressed below the committed baseline.
         #[arg(long)]
         fail_on_regression: bool,
+        /// Drop findings below this severity (`note` < `warning` < `error`) from
+        /// the report, the SARIF, and the failing set. Default `note` keeps
+        /// everything; `warning` hides the high-volume `undocumented` notes;
+        /// `error` keeps only provable drift (broken refs, contradictions).
+        /// Overrides `min_severity` in `.staleguard.toml`.
+        #[arg(long, value_enum)]
+        min_severity: Option<findings::Severity>,
         /// Restrict doc-vs-code checks to these doc paths (repeatable; matched by
         /// exact relative path or path suffix). Skips the repo-wide coverage and
         /// history passes, so it is far cheaper — useful for checking a single
@@ -223,6 +233,7 @@ fn run_check(
     opts: &drift::Options,
     layer: u8,
     doc_filter: &[String],
+    min_severity: Option<findings::Severity>,
 ) -> drift::Outcome {
     let _ = layer; // consulted only in `ml` builds for the Layer 3 judge.
                    // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
@@ -231,6 +242,12 @@ fn run_check(
                    // This is what makes a scoped run cheap: no 1000-commit history parse, no
                    // coverage ranking, and the Layer-3 judge only sees the target doc's claims.
     let scoped = !doc_filter.is_empty();
+    // Optional `.staleguard.toml`: doc-exclude globs + verdict suppression. A
+    // malformed file aborts the run rather than silently dropping a check.
+    let settings = settings::Settings::load(root).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(2);
+    });
     // Repo-wide grounding, built once and shared across every doc.
     let index = CodeIndex::build(root);
     // Manifests are resolved per doc from its nearest ancestor manifest (cached
@@ -274,6 +291,9 @@ fn run_check(
             .unwrap_or(&doc_path)
             .to_string_lossy()
             .to_string();
+        if settings.is_doc_excluded(&rel) {
+            continue;
+        }
         let doc_dir = doc_path.parent().unwrap_or(root).to_path_buf();
         let manifests = manifest_cache
             .entry(doc_dir.clone())
@@ -331,6 +351,9 @@ fn run_check(
                     .unwrap_or(&doc)
                     .to_string_lossy()
                     .to_string();
+                if settings.is_doc_excluded(&rel) {
+                    continue;
+                }
                 claims.extend(judge::candidate_claims(&text, &rel, &index));
             }
         }
@@ -350,6 +373,14 @@ fn run_check(
     if !scoped {
         findings.extend(drift::coupling::check(&history));
     }
+    // Verdict suppression from `.staleguard.toml` (e.g. opt out of `undocumented`).
+    // Applied before the drift pipeline so suppressed findings neither report nor
+    // gate. `Supported` claims are untouched, so the alignment score is unaffected.
+    settings.apply_suppression(&mut findings);
+    // Severity threshold: the `--min-severity` flag wins, else the config value.
+    // Same pre-pipeline placement, so dropped findings neither report nor gate.
+    let threshold = min_severity.or(settings.min_severity);
+    settings::Settings::apply_severity_threshold(&mut findings, threshold);
     drift::run(findings, &index, root, opts)
 }
 
@@ -407,6 +438,7 @@ fn main() -> ExitCode {
             diff,
             write_ledger,
             fail_on_regression,
+            min_severity,
             docs,
         } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
@@ -423,7 +455,7 @@ fn main() -> ExitCode {
                 write_ledger,
                 fail_on_regression,
             };
-            let out = run_check(&root, &opts, layer, &docs);
+            let out = run_check(&root, &opts, layer, &docs, min_severity);
             report::report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {

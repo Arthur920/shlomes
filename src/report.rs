@@ -12,15 +12,38 @@ use crate::rules;
 
 use clap::ValueEnum;
 
-/// How a command renders its result: `text` (human) or `json` (machine-readable).
-#[derive(Clone, Copy, ValueEnum)]
+/// How a command renders its result: `text` (human), `json` (machine-readable),
+/// or `sarif` (GitHub code-scanning; `check` only).
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
     Text,
     Json,
+    /// SARIF 2.1.0 — supported by `check`; other commands fall back to `json`
+    /// with a note on stderr.
+    Sarif,
+}
+
+/// SARIF only maps onto findings (`check`/`coverage`). For the structural
+/// commands (`rules`, `index`) downgrade it to `json` with a one-line note, so
+/// a blanket `--format sarif` in CI still produces machine-readable output.
+fn downgrade_sarif(format: Format, command: &str) -> Format {
+    if format == Format::Sarif {
+        eprintln!(
+            "note: `--format sarif` is only meaningful for findings; emitting json for `{command}`."
+        );
+        return Format::Json;
+    }
+    format
 }
 
 pub(crate) fn report(findings: &[Finding], format: Format) {
     match format {
+        Format::Sarif => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&crate::sarif::render(findings)).unwrap()
+            );
+        }
         Format::Json => {
             println!("{}", serde_json::to_string_pretty(findings).unwrap());
         }
@@ -41,6 +64,12 @@ pub(crate) fn report(findings: &[Finding], format: Format) {
 /// lineage/regression summary.
 pub(crate) fn report_check(out: &drift::Outcome, format: Format) {
     match format {
+        Format::Sarif => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&crate::sarif::render(&out.findings)).unwrap()
+            );
+        }
         Format::Json => {
             let payload = serde_json::json!({
                 "findings": out.findings,
@@ -68,7 +97,9 @@ pub(crate) fn report_check(out: &drift::Outcome, format: Format) {
 /// it came from, and its status (holds / violated / skipped-ungrounded). This is
 /// the visibility layer over the otherwise-silent prose extractor.
 pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
+    let format = downgrade_sarif(format, "rules");
     match format {
+        Format::Sarif => unreachable!(),
         Format::Json => {
             let payload: Vec<_> = rows
                 .iter()
@@ -161,7 +192,9 @@ pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
 }
 
 pub(crate) fn report_index(index: &CodeIndex, format: Format) {
+    let format = downgrade_sarif(format, "index");
     match format {
+        Format::Sarif => unreachable!(),
         Format::Json => {
             println!("{}", serde_json::to_string_pretty(index).unwrap());
         }
