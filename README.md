@@ -126,17 +126,83 @@ staleguard check --write-ledger
 staleguard check --fail-on-regression
 ```
 
-Example GitHub Actions step:
+### GitHub Action
+
+A reusable action installs the binary and runs the check for you:
 
 ```yaml
-- name: doc-coherence
-  run: |
+- uses: Arthur920/Staleguard@v0.2.0
+  with:
+    args: --fail-on-regression       # passed through to `staleguard check`
+```
+
+To get findings as inline PR annotations and entries in the **Security → Code
+scanning** tab, emit SARIF and upload it:
+
+```yaml
+- uses: Arthur920/Staleguard@v0.2.0
+  id: staleguard
+  with:
+    format: sarif
+    args: --min-severity warning   # recommended for first adoption (see below)
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: ${{ steps.staleguard.outputs.sarif-file }}
+```
+
+**First adoption — start at `--min-severity warning`.** A fresh scan of a large
+repo surfaces a lot of `undocumented` findings (public surface no doc mentions);
+those are `note`-level and advisory. `--min-severity warning` drops them and
+keeps only provable drift — broken references and contradictions. Severity ranks
+`note` < `warning` < `error`; raise to `--min-severity error` for the strictest
+gate, or drop the flag (default `note`) once you want the full coverage report.
+
+Action inputs: `args`, `format` (`text`/`json`/`sarif`), `version`, and
+`working-directory`. Or call the binary directly:
+
+```yaml
+- run: |
     brew install Arthur920/tap/staleguard   # or: cargo install --git https://github.com/Arthur920/Staleguard
-    staleguard check --fail-on-regression --format json
+    staleguard check --fail-on-regression --format sarif > staleguard.sarif
 ```
 
 For behavioral checks in CI, build `--features ml` and run `staleguard setup` (cache
 the model download between runs).
+
+### Pre-commit hook
+
+Run the deterministic check locally whenever a doc changes, via
+[pre-commit](https://pre-commit.com):
+
+```yaml
+# .pre-commit-config.yaml
+- repo: https://github.com/Arthur920/Staleguard
+  rev: v0.2.0
+  hooks:
+    - id: staleguard
+```
+
+### Configuration (`.staleguard.toml`)
+
+Drop a `.staleguard.toml` at the repo root to tune a run (all keys optional):
+
+```toml
+# Doc paths to skip, as globs relative to the repo root
+# (`*` within a segment, `**` across segments; a bare name matches in any dir).
+exclude = ["docs/legacy/**", "vendor/**", "NOTES.md"]
+
+# Verdict categories to drop from the report and the failing set. One or more of:
+# "contradicted", "stale", "unverifiable", "undocumented".
+suppress = ["undocumented"]
+
+# Drop everything below this severity (note < warning < error). Same effect as
+# `--min-severity`, which overrides it. `warning` hides the undocumented notes.
+min_severity = "warning"
+```
+
+Neither suppression nor the severity threshold touches the alignment score —
+they only filter what gets reported and what gates CI.
 
 ## Use it in AI-assisted coding (MCP / agents)
 

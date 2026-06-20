@@ -10,6 +10,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::claim::Provenance;
 
+/// Reporting severity of a finding, ordered `Note < Warning < Error`. Used to
+/// gate output by a threshold (`--min-severity`) and to set the SARIF level.
+/// The `Ord` derive relies on the variants being declared low-to-high.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    /// Advisory; high-volume (e.g. undocumented surface). Off by gating thresholds.
+    Note,
+    /// Couldn't be confirmed either way.
+    Warning,
+    /// Provably wrong: a broken reference or a contradicted claim.
+    Error,
+}
+
+impl Severity {
+    /// SARIF level string for this severity.
+    pub fn as_sarif_level(self) -> &'static str {
+        match self {
+            Severity::Note => "note",
+            Severity::Warning => "warning",
+            Severity::Error => "error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
@@ -40,6 +65,18 @@ impl Verdict {
     /// ledgered and scored but not reported.
     pub fn is_reportable(&self) -> bool {
         !matches!(self, Verdict::Supported)
+    }
+
+    /// Reporting severity. `Supported` has no severity (it is never reported);
+    /// it maps to `Note` so it is never dropped by a threshold filter, which only
+    /// ever touches reportable findings.
+    pub fn severity(&self) -> Severity {
+        match self {
+            Verdict::Contradicted | Verdict::Stale => Severity::Error,
+            Verdict::Unverifiable => Severity::Warning,
+            Verdict::Undocumented => Severity::Note,
+            Verdict::Supported => Severity::Note,
+        }
     }
 }
 
