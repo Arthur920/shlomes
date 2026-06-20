@@ -1,7 +1,7 @@
 name: Staleguard
 description: >-
-  Catch documentation drift — fail CI when your READMEs, CLAUDE.md, and docs
-  claim something the code no longer backs up. Deterministic, offline, zero
+  Catch documentation drift — fail CI when your READMEs, and docs
+  claim something the code doesnt back up. Deterministic, offline, zero
   false positives.
 branding:
   icon: check-circle
