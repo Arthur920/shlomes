@@ -28,11 +28,19 @@ pub struct Grounding {
     /// Heads that mark a reference as local: module segments + symbol names,
     /// plus the Rust path keywords.
     anchors: HashSet<String>,
+    /// Names of type containers (struct/class/enum/trait/interface). Their
+    /// members — enum variants, methods, associated items — are not indexed as
+    /// standalone symbols, so a `Type::member` reference is unverifiable rather
+    /// than drift. Module qualifiers are deliberately excluded: a module's
+    /// functions *are* indexed, so `module::missing_fn` is real drift.
+    type_names: HashSet<String>,
 }
 
 impl Grounding {
     pub fn from_index(index: &CodeIndex) -> Grounding {
+        use crate::code::symbol::SymbolKind;
         let mut names = HashSet::new();
+        let mut type_names = HashSet::new();
         let mut anchors: HashSet<String> = ["crate", "self", "super"]
             .iter()
             .map(|s| s.to_string())
@@ -41,6 +49,16 @@ impl Grounding {
         for s in &index.symbols {
             names.insert(s.name.clone());
             anchors.insert(s.name.clone());
+            if matches!(
+                s.kind,
+                SymbolKind::Struct
+                    | SymbolKind::Class
+                    | SymbolKind::Enum
+                    | SymbolKind::Trait
+                    | SymbolKind::Interface
+            ) {
+                type_names.insert(s.name.clone());
+            }
             if let Some(tail) = s.qualified_name.rsplit("::").next() {
                 names.insert(tail.to_string());
             }
@@ -51,7 +69,11 @@ impl Grounding {
                 }
             }
         }
-        Grounding { names, anchors }
+        Grounding {
+            names,
+            anchors,
+            type_names,
+        }
     }
 }
 
@@ -72,6 +94,11 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
         }
         let doc_ref = format!("{doc_path}:{line}");
         let claim = format!("references `{reference}`");
+        // The qualifier directly before the member (`MappingTarget` in
+        // `MappingTarget::MapToUnknown`). Enum variants, methods and associated
+        // items are not indexed as their own symbols, so a member access on a
+        // *known* type is unverifiable, not drift — ground it on the type.
+        let qualifier = (effective.len() >= 2).then(|| effective[effective.len() - 2]);
         if g.names.contains(*member) {
             // Anchor to the member name; the drift changed-set includes symbol
             // short names, so this carries forward until that symbol changes.
@@ -79,6 +106,13 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
                 claim,
                 doc_ref,
                 Provenance::symbol((*member).to_string()),
+            ));
+        } else if let Some(qualifier) = qualifier.filter(|q| g.type_names.contains(*q)) {
+            // Member of a real type we can't introspect (variant/method/assoc).
+            findings.push(Finding::supported(
+                claim,
+                doc_ref,
+                Provenance::symbol(qualifier.to_string()),
             ));
         } else {
             findings.push(Finding::problem(
@@ -170,12 +204,25 @@ mod tests {
         }
     }
 
+    fn typ(name: &str, qualified: &str, module: &str, kind: SymbolKind) -> Symbol {
+        Symbol {
+            kind,
+            ..sym(name, qualified, module)
+        }
+    }
+
     fn grounding() -> Grounding {
         let index = CodeIndex {
             symbols: vec![
                 sym("check_paths", "src::verify::check_paths", "src/verify"),
                 sym("CodeIndex", "src::code::CodeIndex", "src/code"),
                 sym("build", "src::code::CodeIndex::build", "src/code"),
+                typ(
+                    "MappingTarget",
+                    "src::map::MappingTarget",
+                    "src/map",
+                    SymbolKind::Enum,
+                ),
             ],
             edges: vec![],
             module_edges: vec![],
@@ -214,6 +261,25 @@ mod tests {
         let flagged = check("`crate::nowhere::gone`", "README.md", &g);
         assert_eq!(flagged.len(), 1);
         assert!(flagged[0].detail.contains("gone"));
+    }
+
+    #[test]
+    fn enum_variant_of_known_type_is_not_flagged() {
+        let g = grounding();
+        // `MapToUnknown` is an enum variant — not indexed as its own symbol —
+        // but `MappingTarget` is a real enum, so the reference is unverifiable,
+        // not drift.
+        let f = check("Use `MappingTarget::MapToUnknown`.", "README.md", &g);
+        assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
+    }
+
+    #[test]
+    fn missing_fn_in_known_module_is_still_flagged() {
+        let g = grounding();
+        // `verify` is a module (not a type); its functions are indexed, so a
+        // missing one is genuine drift — the type fallback must not mask it.
+        let flagged = check("Call `verify::deleted_fn`.", "README.md", &g);
+        assert_eq!(flagged.len(), 1, "{flagged:?}");
     }
 
     #[test]

@@ -64,9 +64,16 @@ fn check_env_vars(
     code_tokens: &HashSet<String>,
     findings: &mut Vec<Finding>,
 ) {
+    // Names assigned in the doc itself (`MDBOOK_VERS="…"`) are local shell
+    // variables of an example snippet, not env vars the project reads.
+    let assigned = assigned_names(markdown);
     let mut seen = HashSet::new();
     for (line, name) in env_var_claims(markdown) {
-        if SYSTEM_ENV.contains(&name.as_str()) || !seen.insert((line, name.clone())) {
+        if SYSTEM_ENV.contains(&name.as_str())
+            || is_placeholder(&name)
+            || assigned.contains(&name)
+            || !seen.insert((line, name.clone()))
+        {
             continue;
         }
         let doc_ref = format!("{doc_path}:{line}");
@@ -126,18 +133,66 @@ fn check_flags(
     }
 }
 
-/// A flag is grounded if its snake_case or concatenated form is a source
-/// identifier — covers clap-derive (`--max-layer` → field `max_layer`) without
-/// requiring the literal `--max-layer` to appear anywhere.
+/// A flag is grounded if any of its conventional identifier spellings is a source
+/// token. A `--kebab-flag` rarely appears verbatim in code (the literal is split
+/// on `-` by the tokenizer); instead it surfaces as a field or type whose name
+/// drops the dashes in one of a few casings (all for `--type-not`):
+///
+/// - snake_case `type_not` — clap-derive fields, Python/Rust fields
+/// - concat `typenot` — joined-lowercase
+/// - PascalCase `TypeNot` — per-flag structs (ripgrep) / enum variants
+/// - camelCase `typeNot` — JS/TS option fields
+///
+/// All four are exact `HashSet` lookups, so grounding stays case-exact and adds
+/// no corpus-wide lowercasing (which would risk masking real drift).
 fn flag_grounded(flag: &str, code_tokens: &HashSet<String>) -> bool {
-    let snake = flag.replace('-', "_");
-    let concat = flag.replace('-', "");
-    code_tokens.contains(&snake) || code_tokens.contains(&concat)
+    // Negation flags (`--no-color`, `--no-encoding`) are commonly auto-generated
+    // from the positive flag (clap's `no_` negations, ripgrep's `name_negated`),
+    // so they carry no identifier of their own. Ground `--no-foo` whenever `foo`
+    // grounds — far cheaper to miss a never-supported negation than to cry drift
+    // on a real one.
+    if let Some(base) = flag.strip_prefix("no-") {
+        if flag_grounded(base, code_tokens) {
+            return true;
+        }
+    }
+    let segments: Vec<&str> = flag.split('-').filter(|s| !s.is_empty()).collect();
+    let snake = segments.join("_");
+    let concat = segments.concat();
+    let pascal = capitalize_join(&segments, false);
+    let camel = capitalize_join(&segments, true);
+    [snake, concat, pascal, camel]
+        .iter()
+        .any(|form| code_tokens.contains(form))
 }
 
-/// Env-var names from docs: `$NAME` / `${NAME}` anywhere, plus inline
-/// `backtick` spans whose whole content is an `UPPER_SNAKE` env identifier
-/// (requiring an underscore avoids matching prose acronyms like `API`).
+/// Join `segments` with each capitalized (`TypeNot`); when `lower_first`, the
+/// leading segment stays lowercase (`typeNot`).
+fn capitalize_join(segments: &[&str], lower_first: bool) -> String {
+    segments
+        .iter()
+        .enumerate()
+        .map(|(i, seg)| {
+            if i == 0 && lower_first {
+                seg.to_string()
+            } else {
+                let mut chars = seg.chars();
+                match chars.next() {
+                    Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                    None => String::new(),
+                }
+            }
+        })
+        .collect()
+}
+
+/// Env-var names from docs: `$NAME` / `${NAME}` whose name is all-uppercase,
+/// plus inline `backtick` spans whose whole content is an `UPPER_SNAKE` env
+/// identifier (requiring an underscore avoids matching prose acronyms like
+/// `API`). Env vars are UPPER_SNAKE by convention; the casing filter on the
+/// dollar form skips shell variables that follow other conventions — zsh
+/// `$fpath` (lowercase), PowerShell `$OutputEncoding` (PascalCase) — which
+/// appear in example snippets but are not the project's own env vars.
 fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let mut in_fence = false;
@@ -149,7 +204,10 @@ fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
             continue;
         }
         for cap in dollar_env_re().captures_iter(line) {
-            out.push((lineno, cap[1].to_string()));
+            let name = &cap[1];
+            if upper_env_re().is_match(name) {
+                out.push((lineno, name.to_string()));
+            }
         }
         if !in_fence {
             for cap in inline_code_re().captures_iter(line) {
@@ -163,6 +221,27 @@ fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Names assigned somewhere in the doc as a shell variable (`NAME=...`, with an
+/// optional leading `export`). Such names are local to an example snippet and
+/// must not be checked as project env vars.
+fn assigned_names(markdown: &str) -> HashSet<String> {
+    assign_re()
+        .captures_iter(markdown)
+        .map(|c| c[1].to_string())
+        .collect()
+}
+
+/// Documentation placeholders standing in for a real name the reader supplies
+/// (`${YOUR_ENV}`, `$MY_VAR`). Never the project's own env var.
+fn is_placeholder(name: &str) -> bool {
+    const PLACEHOLDER_PREFIXES: &[&str] = &["YOUR_", "MY_"];
+    const PLACEHOLDER_EXACT: &[&str] = &["FOO", "BAR", "BAZ", "PLACEHOLDER", "CHANGEME"];
+    PLACEHOLDER_PREFIXES.iter().any(|p| name.starts_with(p))
+        || PLACEHOLDER_EXACT.contains(&name)
+        || name.contains("YOUR")
+        || name.contains("PLACEHOLDER")
+}
+
 /// clap auto-generates these; they never appear as source identifiers.
 const AUTO_FLAGS: &[&str] = &["help", "version"];
 
@@ -172,6 +251,9 @@ const SYSTEM_ENV: &[&str] = &[
     "PATH",
     "PWD",
     "OLDPWD",
+    "UID",
+    "GID",
+    "EUID",
     "USER",
     "LOGNAME",
     "SHELL",
@@ -208,6 +290,19 @@ fn inline_code_re() -> &'static Regex {
 fn dollar_env_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\$\{?([A-Za-z_][A-Za-z0-9_]+)\}?").unwrap())
+}
+
+/// A shell assignment `NAME=` (optionally `export NAME=`), name all-uppercase.
+fn assign_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?m)(?:^|[;&|]|\bexport\s+)\s*([A-Z][A-Z0-9_]*)=").unwrap())
+}
+
+/// An all-uppercase env-var name (`PORT`, `DATABASE_URL`). Single-word is fine
+/// here because the `$`/`${}` sigil already marks it as a variable, not prose.
+fn upper_env_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[A-Z][A-Z0-9_]*$").unwrap())
 }
 
 /// `UPPER_SNAKE` with at least one underscore.
@@ -261,12 +356,64 @@ mod tests {
     }
 
     #[test]
+    fn locally_assigned_shell_var_is_not_flagged() {
+        let code = HashSet::new();
+        // `MDBOOK_VERS` is assigned in the snippet then used — a local shell var.
+        let md = "```bash\nMDBOOK_VERS=\"1.0\"\ngh release create v$MDBOOK_VERS\n```";
+        let flagged: Vec<String> = check(md, "README.md", &code, &HashSet::new())
+            .iter()
+            .filter(|f| f.verdict.is_reportable())
+            .map(|f| f.detail.clone())
+            .collect();
+        assert!(flagged.is_empty(), "local shell var leaked: {flagged:?}");
+    }
+
+    #[test]
+    fn placeholder_env_var_is_not_flagged() {
+        let code = HashSet::new();
+        let md = "Replace `${YOUR_ENV}` and `$MY_TOKEN` with real values.";
+        let flagged: Vec<String> = check(md, "README.md", &code, &HashSet::new())
+            .iter()
+            .filter(|f| f.verdict.is_reportable())
+            .map(|f| f.detail.clone())
+            .collect();
+        assert!(flagged.is_empty(), "placeholder leaked: {flagged:?}");
+    }
+
+    #[test]
     fn flag_grounded_via_snake_form() {
         let code = tokens(&["max_layer", "format"]);
         // clap derive: --max-layer ↔ field max_layer; --format ↔ field format.
         let md = "`app --max-layer 2 --format json`";
         let findings = check(md, "README.md", &code, &bins(&["app"]));
         assert!(findings.iter().all(|f| !f.verdict.is_reportable()));
+    }
+
+    #[test]
+    fn flag_grounded_via_pascal_and_camel_forms() {
+        // ripgrep-style: `--type-not` surfaces only as a PascalCase struct
+        // `TypeNot` (the kebab name lives in a split-apart string literal).
+        // `--no-color` surfaces as a camelCase JS field `noColor`.
+        let code = tokens(&["TypeNot", "noColor"]);
+        let md = "`rg --type-not rust --no-color`";
+        let findings = check(md, "README.md", &code, &bins(&["rg"]));
+        assert!(
+            findings.iter().all(|f| !f.verdict.is_reportable()),
+            "PascalCase/camelCase fields should ground the flags: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn negation_flag_grounded_via_positive() {
+        // `--no-encoding` is a generated negation of `--encoding`; only the
+        // positive flag (`Encoding`) exists as an identifier.
+        let code = tokens(&["Encoding"]);
+        let md = "`rg --no-encoding`";
+        let findings = check(md, "README.md", &code, &bins(&["rg"]));
+        assert!(
+            findings.iter().all(|f| !f.verdict.is_reportable()),
+            "PascalCase/camelCase fields should ground the flags: {findings:?}"
+        );
     }
 
     #[test]

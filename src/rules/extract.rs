@@ -17,7 +17,14 @@ use super::{Rule, SourcedRule};
 /// ordinary prose.
 pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
     let mut rules = Vec::new();
+    let fenced = crate::extract::fenced_lines(markdown);
     for (i, line) in markdown.lines().enumerate() {
+        // A "rule" inside a fenced code sample is example code, not an enforced
+        // architecture rule — e.g. a `// Don't call X here` comment teaching an
+        // API. Only prose states rules.
+        if fenced[i] {
+            continue;
+        }
         // Drop double-quoted spans: an author quoting an *example* rule
         // ("no `eval`") is describing the feature, not stating an enforced rule.
         let line = quoted_re().replace_all(line, "");

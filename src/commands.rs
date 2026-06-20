@@ -313,16 +313,23 @@ fn classify<'a>(toks: &[&'a str]) -> Option<Target<'a>> {
             }
         }
         "pnpm" | "yarn" => package_runner_script(&toks[1..]),
-        "cargo" => toks
-            .iter()
-            .position(|t| *t == "--bin")
-            .and_then(|i| toks.get(i + 1))
-            .map(|s| Target::CargoBin(s))
-            .or_else(|| {
-                toks.iter()
-                    .find_map(|t| t.strip_prefix("--bin="))
-                    .map(Target::CargoBin)
-            }),
+        "cargo" => {
+            // `cargo new --bin <name>` / `cargo init --bin` *create* a project:
+            // `--bin` is a boolean here, and the trailing name is the new crate,
+            // not a target this repo must already define.
+            if matches!(toks.get(1), Some(&"new") | Some(&"init")) {
+                return None;
+            }
+            toks.iter()
+                .position(|t| *t == "--bin")
+                .and_then(|i| toks.get(i + 1))
+                .map(|s| Target::CargoBin(s))
+                .or_else(|| {
+                    toks.iter()
+                        .find_map(|t| t.strip_prefix("--bin="))
+                        .map(Target::CargoBin)
+                })
+        }
         "make" => make_target(&toks[1..]).map(Target::Make),
         _ => None,
     }
@@ -490,6 +497,16 @@ mod tests {
             .collect();
         assert_eq!(flagged.len(), 1);
         assert!(flagged[0].contains("ghost"));
+    }
+
+    #[test]
+    fn cargo_new_does_not_flag_created_project() {
+        let dir = scratch("cargonew");
+        fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let m = Manifests::load(&dir);
+        // `cargo new --bin foo` creates a project; `foo` is not a target here.
+        let md = "Run `cargo new --bin mdbook-wordcount` to start.";
+        assert!(check(md, "README.md", &m).is_empty());
     }
 
     #[test]

@@ -82,12 +82,13 @@ fn index_emits_json_symbols() {
 #[test]
 fn check_flags_undocumented_public_symbol() {
     // `helper` is public and documented nowhere with no internal callers — a
-    // coverage gap Layer 1 should surface.
+    // coverage gap Layer 1 should surface. It is `note`-level, so it is hidden by
+    // the default `warning` threshold; `--min-severity note` opts it back in.
     let fx = Fixture::new(&[
         ("lib.rs", "pub fn greet() {}\npub fn helper() {}\n"),
         ("README.md", "# Demo\n\n`greet` greets the user.\n"),
     ]);
-    let out = fx.run(&["check", "--format", "json"]);
+    let out = fx.run(&["check", "--format", "json", "--min-severity", "note"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let json: serde_json::Value =
         serde_json::from_str(&stdout).expect("check output is valid JSON");

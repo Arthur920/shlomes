@@ -7,6 +7,31 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+/// Per-line flags marking which lines fall inside a fenced code block
+/// (```` ``` ```` or `~~~`), the fence markers themselves included. Prose
+/// detectors (paths, architecture rules) consult this to skip example code:
+/// a path or rule named inside a code sample illustrates usage, it does not
+/// assert anything about the repo. The command detector deliberately does *not*
+/// use this — commands live in fenced blocks.
+pub fn fenced_lines(markdown: &str) -> Vec<bool> {
+    let mut flags = Vec::new();
+    let mut in_fence = false;
+    for line in markdown.lines() {
+        let is_marker = {
+            let t = line.trim_start();
+            t.starts_with("```") || t.starts_with("~~~")
+        };
+        if is_marker {
+            // The marker line itself is part of the block, not prose.
+            flags.push(true);
+            in_fence = !in_fence;
+        } else {
+            flags.push(in_fence);
+        }
+    }
+    flags
+}
+
 #[derive(Debug, Clone)]
 pub struct PathClaim {
     /// the quoted token, e.g. "src/index.ts"
@@ -225,11 +250,24 @@ fn in_historical_context(lines: &[&str], idx: usize) -> bool {
 pub fn extract_path_claims(markdown: &str, doc_path: &str) -> Vec<PathClaim> {
     let mut claims = Vec::new();
     let lines: Vec<&str> = markdown.lines().collect();
+    let fenced = fenced_lines(markdown);
     for (i, line) in lines.iter().enumerate() {
+        // Paths inside fenced code samples are illustrative (route strings,
+        // example trees, generated output), not assertions about the repo.
+        if fenced[i] {
+            continue;
+        }
         for cap in path_re().captures_iter(line) {
             let token = &cap[1];
             // Skip obvious non-paths (URLs, version specifiers, globs).
             if token.contains("://") || token.starts_with('*') || token.ends_with("/*") {
+                continue;
+            }
+            // Repo-file claims are repo-relative. A leading `/` is an absolute
+            // filesystem path or a web/route path (`/appendices/x.html`); a `../`
+            // escapes the repo-relative frame (a rendered-output link). Neither
+            // asserts a file the repo should contain.
+            if token.starts_with('/') || token.starts_with("../") {
                 continue;
             }
             if !looks_like_path(token) {

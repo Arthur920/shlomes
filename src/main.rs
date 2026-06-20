@@ -94,9 +94,10 @@ enum Commands {
         #[arg(long)]
         fail_on_regression: bool,
         /// Drop findings below this severity (`note` < `warning` < `error`) from
-        /// the report, the SARIF, and the failing set. Default `note` keeps
-        /// everything; `warning` hides the high-volume `undocumented` notes;
-        /// `error` keeps only provable drift (broken refs, contradictions).
+        /// the report, the SARIF, and the failing set. Default `warning` hides the
+        /// high-volume `undocumented` notes and shows only provable drift; `note`
+        /// keeps everything (including the undocumented-surface coverage report);
+        /// `error` keeps only broken refs and contradictions.
         /// Overrides `min_severity` in `.staleguard.toml`.
         #[arg(long, value_enum)]
         min_severity: Option<findings::Severity>,
@@ -377,9 +378,15 @@ fn run_check(
     // Applied before the drift pipeline so suppressed findings neither report nor
     // gate. `Supported` claims are untouched, so the alignment score is unaffected.
     settings.apply_suppression(&mut findings);
-    // Severity threshold: the `--min-severity` flag wins, else the config value.
+    // Severity threshold: the `--min-severity` flag wins, else the config value,
+    // else the default. The default is `warning`, which hides the high-volume
+    // `undocumented` notes so the out-of-the-box run shows only provable drift
+    // (broken refs, contradictions). Pass `--min-severity note` to see everything,
+    // including the undocumented-surface coverage report.
     // Same pre-pipeline placement, so dropped findings neither report nor gate.
-    let threshold = min_severity.or(settings.min_severity);
+    let threshold = min_severity
+        .or(settings.min_severity)
+        .or(Some(findings::Severity::Warning));
     settings::Settings::apply_severity_threshold(&mut findings, threshold);
     drift::run(findings, &index, root, opts)
 }

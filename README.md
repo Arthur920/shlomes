@@ -25,6 +25,10 @@ flags, code symbols), architecture-rule violations parsed from prose,
 undocumented public surface, stale diagrams, and drift over time with a CI
 alignment score. Full breakdown in [DETAILS.md](DETAILS.md).
 
+<p align="center">
+  <img src="demo.gif" alt="Staleguard demo" width="760">
+</p>
+
 ## How it works
 
 The deterministic core (**Layer 1**) is the tool. It checks docs against the real
@@ -131,7 +135,7 @@ staleguard check --fail-on-regression
 A reusable action installs the binary and runs the check for you:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.2.1
+- uses: Arthur920/Staleguard@v0.2.2
   with:
     args: --fail-on-regression       # passed through to `staleguard check`
 ```
@@ -140,23 +144,24 @@ To get findings as inline PR annotations and entries in the **Security → Code
 scanning** tab, emit SARIF and upload it:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.2.1
+- uses: Arthur920/Staleguard@v0.2.2
   id: staleguard
   with:
     format: sarif
-    args: --min-severity warning   # recommended for first adoption (see below)
+    args: --min-severity warning   # the default — provable drift only (see below)
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
     sarif_file: ${{ steps.staleguard.outputs.sarif-file }}
 ```
 
-**First adoption — start at `--min-severity warning`.** A fresh scan of a large
-repo surfaces a lot of `undocumented` findings (public surface no doc mentions);
-those are `note`-level and advisory. `--min-severity warning` drops them and
-keeps only provable drift — broken references and contradictions. Severity ranks
-`note` < `warning` < `error`; raise to `--min-severity error` for the strictest
-gate, or drop the flag (default `note`) once you want the full coverage report.
+**Severity, and what you see by default.** A fresh scan of a large repo surfaces a
+lot of `undocumented` findings (public surface no doc mentions); those are
+`note`-level and advisory. The default threshold is `--min-severity warning`,
+which drops them and keeps only provable drift — broken references and
+contradictions. Severity ranks `note` < `warning` < `error`; raise to
+`--min-severity error` for the strictest gate, or pass `--min-severity note` for
+the full coverage report including the undocumented surface.
 
 Action inputs: `args`, `format` (`text`/`json`/`sarif`), `version`, and
 `working-directory`. Or call the binary directly:
@@ -178,7 +183,7 @@ Run the deterministic check locally whenever a doc changes, via
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/Arthur920/Staleguard
-  rev: v0.2.1
+  rev: v0.2.2
   hooks:
     - id: staleguard
 ```
@@ -197,12 +202,17 @@ exclude = ["docs/legacy/**", "vendor/**", "NOTES.md"]
 suppress = ["undocumented"]
 
 # Drop everything below this severity (note < warning < error). Same effect as
-# `--min-severity`, which overrides it. `warning` hides the undocumented notes.
+# `--min-severity`, which overrides it. Defaults to `warning` (hides the
+# undocumented notes); set `note` to keep the full coverage report.
 min_severity = "warning"
 ```
 
-Neither suppression nor the severity threshold touches the alignment score —
-they only filter what gets reported and what gates CI.
+Both suppression and the severity threshold affect the alignment score:
+filtered-out claims (e.g. the `undocumented` notes hidden by the default
+`warning`) drop out of the denominator, while `Supported` claims are always kept.
+So a stricter threshold or more suppression reports a higher score over the
+claims that remain — the score describes what you chose to check, not the whole
+repo.
 
 ## Use it in AI-assisted coding (MCP / agents)
 
