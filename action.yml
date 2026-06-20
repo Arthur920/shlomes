@@ -20,7 +20,7 @@ inputs:
     default: "."
   version:
     description: >-
-      Staleguard release tag to install (e.g. "v0.2.0"), or "latest".
+      Staleguard release tag to install (e.g. "v0.2.1"), or "latest".
     required: false
     default: latest
   format:
