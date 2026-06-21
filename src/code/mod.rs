@@ -12,6 +12,7 @@ pub mod symbol;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use rayon::prelude::*;
 use serde::Serialize;
@@ -32,7 +33,162 @@ pub struct CodeIndex {
     /// only edges whose target resolves to a real module are kept. The clean
     /// substrate architecture-rule checks run against.
     pub module_edges: Vec<DepEdge>,
-    pub ref_edges: Vec<RefEdge>,
+    /// Symbol reference graph keyed by target: `ref_callers[to]` is the distinct
+    /// set of `from` symbols that reference `to`. This replaces a flat
+    /// `Vec<RefEdge>` so [`Self::symbol_fan_in`] is an O(1) lookup rather than an
+    /// O(edges) scan — coverage calls it once per symbol, so the old flat shape
+    /// was O(symbols × edges), the quadratic that hung on large repos (litellm).
+    /// Each edge also stores one interned `Arc<str>` caller (under its shared
+    /// target key) instead of two cloned names. Serializes back to the original
+    /// flat `[{from_symbol, to_symbol}]` array under the key `ref_edges`, so the
+    /// `index` dump shape is unchanged.
+    #[serde(rename = "ref_edges", serialize_with = "serialize_ref_callers")]
+    pub ref_callers: HashMap<Arc<str>, Vec<Arc<str>>>,
+}
+
+/// Flatten the target-keyed caller map back into the historical
+/// `[{from_symbol, to_symbol}]` array, sorted for a deterministic dump.
+fn serialize_ref_callers<S: serde::Serializer>(
+    callers: &HashMap<Arc<str>, Vec<Arc<str>>>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut flat: Vec<(&str, &str)> = callers
+        .iter()
+        .flat_map(|(to, froms)| froms.iter().map(move |from| (from.as_ref(), to.as_ref())))
+        .collect();
+    flat.sort_unstable();
+    let mut seq = s.serialize_seq(Some(flat.len()))?;
+    for (from, to) in flat {
+        seq.serialize_element(&RefEdge {
+            from_symbol: Arc::from(from),
+            to_symbol: Arc::from(to),
+        })?;
+    }
+    seq.end()
+}
+
+/// Build the target-keyed caller map from flat edges, deduping callers per
+/// target. The inverse of the flat serialization above; used by tests that
+/// construct a [`CodeIndex`] from explicit edges.
+#[cfg(test)]
+pub fn ref_callers_from(edges: impl IntoIterator<Item = RefEdge>) -> HashMap<Arc<str>, Vec<Arc<str>>> {
+    let mut map: HashMap<Arc<str>, Vec<Arc<str>>> = HashMap::new();
+    for e in edges {
+        let froms = map.entry(e.to_symbol).or_default();
+        if !froms.contains(&e.from_symbol) {
+            froms.push(e.from_symbol);
+        }
+    }
+    map
+}
+
+/// Prebuilt symbol lookups shared across the claim-grounding and evidence passes,
+/// so neither re-scans the whole symbol table per claim (the old shape was
+/// O(claims × symbols)). Borrows the index, so rebuild it if the index changes.
+/// Only the `ml` build's Layer 2/3 uses it.
+#[cfg(feature = "ml")]
+pub struct SymbolLookup<'a> {
+    symbols: &'a [Symbol],
+    /// `qualified_name` -> all symbol indices with that name (ascending).
+    by_qname: HashMap<&'a str, Vec<usize>>,
+    /// `name` -> earliest symbol index with that leaf name.
+    by_name: HashMap<&'a str, usize>,
+    /// leaf of `qualified_name` (segment after the last `::`) -> earliest index.
+    by_leaf: HashMap<&'a str, usize>,
+    /// module path -> symbol indices defined in it (ascending).
+    by_module: HashMap<&'a str, Vec<usize>>,
+    /// the index's `module_set` (symbol modules + edge sources), borrowed.
+    modules: HashSet<&'a str>,
+}
+
+#[cfg(feature = "ml")]
+impl<'a> SymbolLookup<'a> {
+    pub fn build(index: &'a CodeIndex) -> SymbolLookup<'a> {
+        let symbols = index.symbols.as_slice();
+        let mut by_qname: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut by_name: HashMap<&str, usize> = HashMap::new();
+        let mut by_leaf: HashMap<&str, usize> = HashMap::new();
+        let mut by_module: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut modules: HashSet<&str> = HashSet::new();
+        for (i, s) in symbols.iter().enumerate() {
+            by_qname.entry(&s.qualified_name).or_default().push(i);
+            by_name.entry(&s.name).or_insert(i);
+            let leaf = s
+                .qualified_name
+                .rsplit("::")
+                .next()
+                .unwrap_or(&s.qualified_name);
+            by_leaf.entry(leaf).or_insert(i);
+            by_module.entry(&s.module).or_default().push(i);
+            modules.insert(&s.module);
+        }
+        for e in &index.edges {
+            modules.insert(&e.from_module);
+        }
+        SymbolLookup {
+            symbols,
+            by_qname,
+            by_name,
+            by_leaf,
+            by_module,
+            modules,
+        }
+    }
+
+    /// The earliest symbol whose `qualified_name == tok`, `name == tok`, or
+    /// `qualified_name` ends with `::tok` — faithfully matching the original
+    /// linear `find` (first symbol satisfying any of the three). Tokens that
+    /// contain `::` fall back to a scan, since a general suffix match can't be
+    /// served by the hashed indexes; such tokens are rare for backtick names.
+    pub fn resolve_token(&self, tok: &str) -> Option<&'a Symbol> {
+        if tok.contains("::") {
+            return self.symbols.iter().find(|s| {
+                s.qualified_name == tok
+                    || s.name == tok
+                    || s.qualified_name.ends_with(&format!("::{tok}"))
+            });
+        }
+        // Each map already holds the earliest index for its key, so the min over
+        // the three is the earliest symbol matching any condition.
+        [
+            self.by_qname.get(tok).map(|v| v[0]),
+            self.by_name.get(tok).copied(),
+            self.by_leaf.get(tok).copied(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(|i| &self.symbols[i])
+    }
+
+    /// All symbols whose `qualified_name` equals `qn`.
+    pub fn by_qualified(&self, qn: &str) -> impl Iterator<Item = &'a Symbol> + '_ {
+        self.by_qname
+            .get(qn)
+            .into_iter()
+            .flatten()
+            .map(move |&i| &self.symbols[i])
+    }
+
+    /// Public symbols defined in module `m`.
+    pub fn public_in_module(&self, m: &str) -> impl Iterator<Item = &'a Symbol> + '_ {
+        self.by_module
+            .get(m)
+            .into_iter()
+            .flatten()
+            .map(move |&i| &self.symbols[i])
+            .filter(|s| s.visibility == symbol::Visibility::Public)
+    }
+
+    /// The first module whose path fuzzily matches `tok` (the module fallback for
+    /// a backtick token that grounded to no symbol).
+    pub fn module_matches(&self, tok: &str) -> Option<&'a str> {
+        self.modules
+            .iter()
+            .find(|m| crate::rules::matches(m, tok))
+            .copied()
+    }
 }
 
 impl CodeIndex {
@@ -48,21 +204,26 @@ impl CodeIndex {
             .map(|file| extract::extract_file(file, repo_root))
             .collect();
 
+        // Merge symbols/edges into flat Vecs, but keep each file's raw refs in
+        // their own already-allocated Vec rather than concatenating them — the raw
+        // (pre-resolution) ref set is the largest collection on large repos, and a
+        // single flattened copy would double its peak footprint. `resolve_refs`
+        // only streams them once, so we hand it a lazy `flatten()` instead.
         let mut symbols = Vec::new();
         let mut edges = Vec::new();
-        let mut raw_refs = Vec::new();
+        let mut raw_per_file: Vec<Vec<RawRef>> = Vec::with_capacity(per_file.len());
         for (s, e, r) in per_file {
             symbols.extend(s);
             edges.extend(e);
-            raw_refs.extend(r);
+            raw_per_file.push(r);
         }
-        let ref_edges = resolve_refs(&symbols, raw_refs);
+        let ref_callers = resolve_refs(&symbols, raw_per_file.into_iter().flatten());
         let module_edges = resolve_module_edges(&symbols, &edges);
         CodeIndex {
             symbols,
             edges,
             module_edges,
-            ref_edges,
+            ref_callers,
         }
     }
 
@@ -86,12 +247,9 @@ impl CodeIndex {
     /// per-symbol risk signal for coverage-gaps, and the basis for the
     /// dead-code-vs-undocumented distinction.
     pub fn symbol_fan_in(&self, qualified_name: &str) -> usize {
-        self.ref_edges
-            .iter()
-            .filter(|e| e.to_symbol == qualified_name)
-            .map(|e| e.from_symbol.as_str())
-            .collect::<HashSet<_>>()
-            .len()
+        // Callers are deduped per target at construction, so the stored length is
+        // already the distinct-caller count — an O(1) lookup.
+        self.ref_callers.get(qualified_name).map_or(0, Vec::len)
     }
 }
 
@@ -150,8 +308,12 @@ const MAX_DEFS_PER_NAME: usize = 32;
 /// duplicate `(from, to)` pairs are dropped.
 ///
 /// Dedup is done over interned `u32` ids rather than cloned `String` pairs, so
-/// the `seen` set costs 8 bytes per pair instead of two heap allocations.
-fn resolve_refs(symbols: &[Symbol], raw_refs: Vec<RawRef>) -> Vec<RefEdge> {
+/// the `seen` set costs 8 bytes per pair instead of two heap allocations, and the
+/// target-keyed caller map is built in a single pass (no intermediate edge list).
+fn resolve_refs(
+    symbols: &[Symbol],
+    raw_refs: impl IntoIterator<Item = RawRef>,
+) -> HashMap<Arc<str>, Vec<Arc<str>>> {
     let mut by_name: HashMap<&str, Vec<&str>> = HashMap::new();
     for s in symbols {
         by_name
@@ -160,41 +322,53 @@ fn resolve_refs(symbols: &[Symbol], raw_refs: Vec<RawRef>) -> Vec<RefEdge> {
             .push(s.qualified_name.as_str());
     }
 
-    // Intern qualified names / module paths to small ids. One allocation per
-    // distinct endpoint (linear in symbols), versus two per emitted pair before.
-    let mut ids: HashMap<String, u32> = HashMap::new();
-    let mut id_of = |s: &str| -> u32 {
+    // Intern qualified names to small ids *and* a shared `Arc<str>` per distinct
+    // endpoint (linear in symbols), so each emitted edge reuses one allocation
+    // rather than cloning two long names. `pool[id]` is the interned name for id.
+    // `intern` is a free fn (not a closure capturing `pool`), so its borrow of
+    // `pool` is released at each return — letting us read `pool[id]` in the same
+    // loop and build the caller map in one pass, with no intermediate edge list.
+    fn intern(ids: &mut HashMap<Arc<str>, u32>, pool: &mut Vec<Arc<str>>, s: &str) -> u32 {
         if let Some(&i) = ids.get(s) {
             return i;
         }
-        let i = ids.len() as u32;
-        ids.insert(s.to_string(), i);
+        let i = pool.len() as u32;
+        let arc: Arc<str> = Arc::from(s);
+        pool.push(arc.clone());
+        ids.insert(arc, i);
         i
-    };
+    }
 
+    let mut ids: HashMap<Arc<str>, u32> = HashMap::new();
+    let mut pool: Vec<Arc<str>> = Vec::new();
+    // `seen` dedups `(from, to)` over 8-byte id pairs (no string allocs); callers
+    // are grouped by target as we go. A hot callee's many callers each cost one
+    // `Arc` clone (a refcount bump), not a fresh copy of its long name.
     let mut seen: HashSet<(u32, u32)> = HashSet::new();
-    let mut edges = Vec::new();
-    for r in &raw_refs {
+    let mut callers: HashMap<Arc<str>, Vec<Arc<str>>> = HashMap::new();
+    for r in raw_refs {
         let Some(targets) = by_name.get(r.name.as_str()) else {
             continue;
         };
         if targets.len() > MAX_DEFS_PER_NAME {
             continue;
         }
-        let from_id = id_of(&r.from);
+        let from_id = intern(&mut ids, &mut pool, &r.from);
         for &to in targets {
             if to == r.from {
                 continue;
             }
-            if seen.insert((from_id, id_of(to))) {
-                edges.push(RefEdge {
-                    from_symbol: r.from.clone(),
-                    to_symbol: to.to_string(),
-                });
+            let to_id = intern(&mut ids, &mut pool, to);
+            if seen.insert((from_id, to_id)) {
+                let to_arc = pool[to_id as usize].clone();
+                callers
+                    .entry(to_arc)
+                    .or_default()
+                    .push(pool[from_id as usize].clone());
             }
         }
     }
-    edges
+    callers
 }
 
 #[cfg(test)]
@@ -245,12 +419,12 @@ mod tests {
                 name: "target".into(),
             },
         ];
-        let ref_edges = resolve_refs(&symbols, raw);
+        let ref_callers = resolve_refs(&symbols, raw);
         let index = CodeIndex {
             symbols,
             edges: vec![],
             module_edges: vec![],
-            ref_edges,
+            ref_callers,
         };
         assert_eq!(index.symbol_fan_in("m::target"), 2);
     }
@@ -266,9 +440,9 @@ mod tests {
             from: "c::caller".into(),
             name: "run".into(),
         }];
-        let edges = resolve_refs(&symbols, raw);
-        assert!(edges.iter().any(|e| e.to_symbol == "a::run"));
-        assert!(edges.iter().any(|e| e.to_symbol == "b::run"));
+        let callers = resolve_refs(&symbols, raw);
+        assert!(callers.contains_key("a::run"));
+        assert!(callers.contains_key("b::run"));
     }
 
     #[test]

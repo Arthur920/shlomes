@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::claim::Provenance;
 use crate::code::symbol::Visibility;
-use crate::code::CodeIndex;
+use crate::code::{CodeIndex, SymbolLookup};
 
 /// One premise chunk for the judge: code text plus where it came from.
 pub struct Evidence {
@@ -38,10 +38,12 @@ pub type FileCache = HashMap<String, Option<Vec<String>>>;
 /// Gather evidence for one claim: grounded symbols/modules first, then a lexical
 /// fallback over the public symbol table if nothing grounded. Returns up to `k`,
 /// best first.
+#[allow(clippy::too_many_arguments)] // cohesive evidence-gathering inputs
 pub fn gather(
     claim_text: &str,
     prov: &Provenance,
     index: &CodeIndex,
+    lookup: &SymbolLookup,
     lexicon: &Lexicon,
     root: &Path,
     k: usize,
@@ -52,7 +54,7 @@ pub fn gather(
 
     // 1. Symbols the claim grounded to (exact, preferred).
     for qn in &prov.symbols {
-        for sym in index.symbols.iter().filter(|s| &s.qualified_name == qn) {
+        for sym in lookup.by_qualified(qn) {
             if let Some(ev) = symbol_evidence(sym, root, 3.0, files) {
                 if seen.insert((ev.path.clone(), ev.start_line)) {
                     out.push(ev);
@@ -63,12 +65,7 @@ pub fn gather(
 
     // 2. Modules the claim grounded to: their top-level public symbols.
     for m in &prov.modules {
-        for sym in index
-            .symbols
-            .iter()
-            .filter(|s| &s.module == m && s.visibility == Visibility::Public)
-            .take(k)
-        {
+        for sym in lookup.public_in_module(m).take(k) {
             if let Some(ev) = symbol_evidence(sym, root, 2.0, files) {
                 if seen.insert((ev.path.clone(), ev.start_line)) {
                     out.push(ev);
@@ -171,7 +168,13 @@ impl Lexicon {
             full.sort();
             full.dedup();
             for t in &full {
-                *df.entry(t.clone()).or_default() += 1;
+                // Clone the token into the table only on first sight; repeat
+                // tokens (the common case across the symbol set) just bump a count.
+                if let Some(c) = df.get_mut(t) {
+                    *c += 1;
+                } else {
+                    df.insert(t.clone(), 1);
+                }
             }
             entries.push((i, name_toks, full));
         }
@@ -463,8 +466,8 @@ mod tests {
     /// Run the real extraction step and return the single grounded claim for a
     /// one-line doc; panics if the corpus line stops being a valid candidate claim
     /// (a drift in candidate_claims this harness should catch).
-    fn claim_for(line: &str, index: &CodeIndex) -> crate::judge::ProseClaim {
-        let mut claims = crate::judge::candidate_claims(line, "DOC.md", index);
+    fn claim_for(line: &str, lookup: &SymbolLookup) -> crate::judge::ProseClaim {
+        let mut claims = crate::judge::candidate_claims(line, "DOC.md", lookup);
         assert_eq!(
             claims.len(),
             1,
@@ -500,15 +503,17 @@ mod tests {
         let root = write_fixture_repo();
         let index = CodeIndex::build(&root);
         let lexicon = Lexicon::build(&index);
+        let lookup = SymbolLookup::build(&index);
         let mut files = FileCache::new();
 
         let mut hits: Vec<(bool, bool, &str)> = Vec::new();
         for (line, gold) in RECALL_CORPUS {
-            let claim = claim_for(line, &index);
+            let claim = claim_for(line, &lookup);
             let ev = gather(
                 &claim.text,
                 &claim.provenance,
                 &index,
+                &lookup,
                 &lexicon,
                 &root,
                 RECALL_K,

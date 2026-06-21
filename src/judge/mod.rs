@@ -327,6 +327,7 @@ pub fn check(
                 .collect()
         } else {
             let lexicon = crate::evidence::Lexicon::build(index);
+            let lookup = crate::code::SymbolLookup::build(index);
             let mut files = crate::evidence::FileCache::new();
             claims
                 .iter()
@@ -335,6 +336,7 @@ pub fn check(
                         &c.text,
                         &c.provenance,
                         index,
+                        &lookup,
                         &lexicon,
                         root,
                         k,
@@ -470,7 +472,9 @@ let in_fence = `ignored`;
 | col | `cell` |
 plain sentence without code tokens here at all
 ";
-        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        let idx = CodeIndex::default();
+        let lookup = crate::code::SymbolLookup::build(&idx);
+        let claims = candidate_claims(md, "DOC.md", &lookup);
         let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(
             texts,
@@ -487,7 +491,9 @@ plain sentence without code tokens here at all
 - The `judge` reads the resolved symbol body as the premise and
   classifies the `claim` against it, emitting one verdict.
 ";
-        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        let idx = CodeIndex::default();
+        let lookup = crate::code::SymbolLookup::build(&idx);
+        let claims = candidate_claims(md, "DOC.md", &lookup);
         assert_eq!(claims.len(), 1);
         assert_eq!(
             claims[0].text,
@@ -507,7 +513,9 @@ forbidden imports — \"`controllers` must not import `db`\"
 
 The `check` command resolves `Manifests` from the nearest ancestor directory.
 ";
-        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        let idx = CodeIndex::default();
+        let lookup = crate::code::SymbolLookup::build(&idx);
+        let claims = candidate_claims(md, "DOC.md", &lookup);
         let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(
             texts,
@@ -525,7 +533,9 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
 - `--diff <ref>` re-checks only what changed since a git ref in the working tree.
 - The `check` command grounds each `claim` to an indexed symbol before judging.
 ";
-        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        let idx = CodeIndex::default();
+        let lookup = crate::code::SymbolLookup::build(&idx);
+        let claims = candidate_claims(md, "DOC.md", &lookup);
         let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(
             texts,
@@ -587,15 +597,15 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
             calls: Vec::new(),
             members: Vec::new(),
         });
-        let modules = index.module_set();
+        let lookup = crate::code::SymbolLookup::build(&index);
 
         // Symbol token grounds to the symbol; module token grounds to the module.
-        let prov = ground_claim("`invalidate` lives in `cache`", &index, &modules);
+        let prov = ground_claim("`invalidate` lives in `cache`", &lookup);
         assert_eq!(prov.symbols, vec!["src/cache::invalidate"]);
         assert_eq!(prov.modules, vec!["src/cache"]);
 
         // A token matching nothing is ignored.
-        let prov = ground_claim("see `nonexistent_thing` here", &index, &modules);
+        let prov = ground_claim("see `nonexistent_thing` here", &lookup);
         assert!(prov.is_empty());
     }
 

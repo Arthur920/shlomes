@@ -166,13 +166,18 @@ fn sources(markdown: &str) -> Vec<Source> {
 
 /// Diagram-coherence findings for one markdown document. `root` is the repo root
 /// (needed only to extract the SQL schema for ER diagrams).
-pub fn check(markdown: &str, doc_path: &str, index: &CodeIndex, root: &Path) -> Vec<Finding> {
-    let modules = index.module_set();
+pub fn check(
+    markdown: &str,
+    doc_path: &str,
+    index: &CodeIndex,
+    modules: &HashSet<String>,
+    root: &Path,
+) -> Vec<Finding> {
     let mut out = Vec::new();
     for src in sources(markdown) {
         let origin = format!("{doc_path}:{}", src.line);
         if let Some(d) = parse(src.format, &src.body, &origin) {
-            out.extend(diff(&d, index, &modules));
+            out.extend(diff(&d, index, modules));
         } else if let Some(seq) = sequence::parse(src.format, &src.body, &origin) {
             // Ordered diagrams are aligned, not set-diffed.
             out.extend(align::check(&seq, index));
@@ -205,10 +210,14 @@ pub fn collect_dot_files(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Diagram-coherence findings for a standalone DOT file.
-pub fn check_dot_file(body: &str, origin: &str, index: &CodeIndex) -> Vec<Finding> {
-    let modules = index.module_set();
+pub fn check_dot_file(
+    body: &str,
+    origin: &str,
+    index: &CodeIndex,
+    modules: &HashSet<String>,
+) -> Vec<Finding> {
     match parse(Format::Dot, body, origin) {
-        Some(d) => diff(&d, index, &modules),
+        Some(d) => diff(&d, index, modules),
         None => Vec::new(),
     }
 }

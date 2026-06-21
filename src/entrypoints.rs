@@ -226,7 +226,7 @@ mod tests {
             ],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![],
+            ref_callers: Default::default(),
         };
         Grounding::from_index(&index)
     }

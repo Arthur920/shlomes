@@ -3,6 +3,8 @@
 //! These are the substrate every designed feature reads from — coverage gaps,
 //! diagram edge-diff, architecture rules, drift provenance/fingerprints.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 /// What kind of definition a [`Symbol`] is. Tag kind names differ per grammar;
@@ -122,8 +124,15 @@ pub struct DepEdge {
 /// the definition `to_symbol` (a call, impl, or type use). Both endpoints are
 /// `qualified_name`s. Targets are resolved by name (over-approximate on
 /// collisions), so this never under-counts a symbol's callers.
+///
+/// Endpoints are `Arc<str>` rather than `String`: the same qualified name recurs
+/// across many edges (a hot callee, or a caller that references many symbols), so
+/// interning them into shared allocations keeps the reference graph linear in
+/// *distinct symbols* instead of duplicating long names per edge — what kept a
+/// large Python repo (litellm) from OOMing. Serializes as the plain string (serde
+/// `rc` feature), so the `index` dump shape is unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RefEdge {
-    pub from_symbol: String,
-    pub to_symbol: String,
+    pub from_symbol: Arc<str>,
+    pub to_symbol: Arc<str>,
 }

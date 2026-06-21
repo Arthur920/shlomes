@@ -267,6 +267,10 @@ fn run_check(
     // The repo's path list, walked once, so each doc's path claims match in
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
+    // The repo's internal module paths, computed once and shared — diagram
+    // grounding needs it per embedded diagram, so building it here avoids
+    // re-cloning every module name into a fresh set per documentation file.
+    let modules = index.module_set();
 
     let ctx = check::CheckContext {
         root,
@@ -274,6 +278,7 @@ fn run_check(
         grounding: &grounding,
         code_tokens: &code_tokens,
         repo_files: &repo_files,
+        modules: &modules,
     };
     let doc_checks = check::doc_checks();
 
@@ -322,7 +327,7 @@ fn run_check(
                     .unwrap_or(&dot)
                     .to_string_lossy()
                     .to_string();
-                findings.extend(diagram::check_dot_file(&text, &rel, &index));
+                findings.extend(diagram::check_dot_file(&text, &rel, &index, &modules));
             }
         }
     }
@@ -345,6 +350,8 @@ fn run_check(
              verdicts are advisory — review contradictions before acting."
         );
         let mut claims = Vec::new();
+        // Build the shared symbol lookup once; claim grounding reuses it per doc.
+        let lookup = crate::code::SymbolLookup::build(&index);
         for doc in collect_docs_filtered(root, doc_filter) {
             if let Ok(text) = std::fs::read_to_string(&doc) {
                 let rel = doc
@@ -355,7 +362,7 @@ fn run_check(
                 if settings.is_doc_excluded(&rel) {
                     continue;
                 }
-                claims.extend(judge::candidate_claims(&text, &rel, &index));
+                claims.extend(judge::candidate_claims(&text, &rel, &lookup));
             }
         }
         let cap = judge::max_claims();

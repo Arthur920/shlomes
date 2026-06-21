@@ -211,15 +211,23 @@ pub(crate) fn report_index(index: &CodeIndex, format: Format) {
             for e in &index.module_edges {
                 println!("mod-edge  {} -> {}", e.from_module, e.to_module);
             }
-            for r in &index.ref_edges {
-                println!("ref-edge  {} -> {}", r.from_symbol, r.to_symbol);
+            // Flatten + sort the target-keyed caller map so the dump is
+            // deterministic regardless of `HashMap` iteration order.
+            let mut ref_edges: Vec<(&str, &str)> = index
+                .ref_callers
+                .iter()
+                .flat_map(|(to, froms)| froms.iter().map(move |from| (from.as_ref(), to.as_ref())))
+                .collect();
+            ref_edges.sort_unstable();
+            for (from, to) in &ref_edges {
+                println!("ref-edge  {from} -> {to}");
             }
             println!(
                 "\n{} symbol(s), {} edge(s), {} mod-edge(s), {} ref-edge(s)",
                 index.symbols.len(),
                 index.edges.len(),
                 index.module_edges.len(),
-                index.ref_edges.len()
+                ref_edges.len()
             );
         }
     }

@@ -6,13 +6,12 @@
 //! the real filter), but it only hands the model *propositions*: soft-wrapped
 //! lines are reassembled, and fragments/quoted examples/feature entries dropped.
 
-use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use regex::Regex;
 
 use crate::claim::Provenance;
-use crate::code::CodeIndex;
+use crate::code::SymbolLookup;
 
 use super::ProseClaim;
 
@@ -24,8 +23,7 @@ use super::ProseClaim;
 /// logical claim (so it isn't judged as a truncated fragment), and sentence
 /// fragments and quoted illustrative examples are dropped. Skips fenced code,
 /// headings, and table rows.
-pub fn candidate_claims(text: &str, doc_path: &str, index: &CodeIndex) -> Vec<ProseClaim> {
-    let modules = index.module_set();
+pub fn candidate_claims(text: &str, doc_path: &str, lookup: &SymbolLookup) -> Vec<ProseClaim> {
     let mut out = Vec::new();
     for (start, block) in logical_lines(text) {
         let cleaned = block
@@ -46,7 +44,7 @@ pub fn candidate_claims(text: &str, doc_path: &str, index: &CodeIndex) -> Vec<Pr
         {
             continue;
         }
-        let provenance = ground_claim(&cleaned, index, &modules);
+        let provenance = ground_claim(&cleaned, lookup);
         out.push(ProseClaim {
             text: cleaned,
             doc_ref: format!("{doc_path}:{}", start + 1),
@@ -178,20 +176,16 @@ fn is_quoted_example(s: &str) -> bool {
 /// symbol becomes a symbol anchor (preferred — survives moves), else a module
 /// anchor if it matches a real module path. Tokens that match neither (paths,
 /// commands, prose) are ignored.
-pub(super) fn ground_claim(line: &str, index: &CodeIndex, modules: &HashSet<String>) -> Provenance {
+pub(super) fn ground_claim(line: &str, lookup: &SymbolLookup) -> Provenance {
     let mut prov = Provenance::default();
     for tok in backtick_tokens(line) {
-        if let Some(sym) = index.symbols.iter().find(|s| {
-            s.qualified_name == tok
-                || s.name == tok
-                || s.qualified_name.ends_with(&format!("::{tok}"))
-        }) {
+        if let Some(sym) = lookup.resolve_token(&tok) {
             if !prov.symbols.contains(&sym.qualified_name) {
                 prov.symbols.push(sym.qualified_name.clone());
             }
-        } else if let Some(m) = modules.iter().find(|m| crate::rules::matches(m, &tok)) {
-            if !prov.modules.contains(m) {
-                prov.modules.push(m.clone());
+        } else if let Some(m) = lookup.module_matches(&tok) {
+            if !prov.modules.iter().any(|x| x == m) {
+                prov.modules.push(m.to_string());
             }
         }
     }

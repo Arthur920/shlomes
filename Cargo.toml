@@ -28,7 +28,10 @@ regex = "1"
 # Per-file parsing in `CodeIndex::build` is embarrassingly parallel (each file
 # gets its own tree-sitter parser); rayon fans it across cores.
 rayon = "1"
-serde = { version = "1", features = ["derive"] }
+# `rc` lets `Arc<str>` serialize as its string: `RefEdge` interns its endpoints
+# into shared `Arc<str>`s so a large repo's reference graph doesn't duplicate
+# every long qualified name across millions of edges (the litellm OOM).
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 # Optional `.staleguard.toml` config (exclude globs, verdict suppression).
 toml = { version = "0.8", default-features = false, features = ["parse"] }

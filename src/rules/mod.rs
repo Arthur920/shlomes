@@ -155,7 +155,7 @@ mod tests {
                 .flat_map(|e| [edge(&e.from_module, "x"), edge(&e.to_module, "x")])
                 .collect(),
             module_edges: edges,
-            ref_edges: vec![],
+            ref_callers: Default::default(),
         }
     }
 
@@ -613,10 +613,10 @@ mod tests {
             symbol("Client", "src/legacy::Client", "src/legacy"),
             symbol("run", "src/app::run", "src/app"),
         ];
-        idx.ref_edges = vec![RefEdge {
+        idx.ref_callers = crate::code::ref_callers_from(vec![RefEdge {
             from_symbol: "src/app::run".into(),
             to_symbol: "src/legacy::Client".into(),
-        }];
+        }]);
         let rules = rule(Rule::ForbidSymbol {
             symbol: "legacy::Client".into(),
             except: vec![],
@@ -637,10 +637,10 @@ mod tests {
             symbol("Client", "src/modern::Client", "src/modern"),
             symbol("run", "src/app::run", "src/app"),
         ];
-        idx.ref_edges = vec![RefEdge {
+        idx.ref_callers = crate::code::ref_callers_from(vec![RefEdge {
             from_symbol: "src/app::run".into(),
             to_symbol: "src/legacy::Client".into(),
-        }];
+        }]);
         let rules = rule(Rule::ForbidSymbol {
             symbol: "Client".into(),
             except: vec![],

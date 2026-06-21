@@ -28,6 +28,10 @@ pub(crate) struct CheckContext<'a> {
     pub code_tokens: &'a std::collections::HashSet<String>,
     /// The repo's path list, walked once, so path claims match in memory.
     pub repo_files: &'a [String],
+    /// The repo's internal module paths, computed once. Diagram grounding needs
+    /// this for every embedded diagram; computing it here (rather than per doc)
+    /// avoids re-cloning every module name into a fresh set per documentation file.
+    pub modules: &'a std::collections::HashSet<String>,
 }
 
 /// One documentation file in flight: its text, its repo-relative path (used as the
@@ -105,6 +109,6 @@ impl DocCheck for ConstSwapCheck {
 struct DiagramCheck;
 impl DocCheck for DiagramCheck {
     fn check(&self, doc: &Doc, ctx: &CheckContext) -> Vec<Finding> {
-        diagram::check(&doc.text, &doc.rel, ctx.index, ctx.root)
+        diagram::check(&doc.text, &doc.rel, ctx.index, ctx.modules, ctx.root)
     }
 }

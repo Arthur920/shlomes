@@ -294,8 +294,8 @@ pub(super) fn read_sources(repo_root: &Path) -> Vec<(String, String)> {
 /// Check a forbid-symbol rule. Returns the (deduped) modules it scanned so a
 /// clean rule can be anchored to them. Two passes: a textual scan of source
 /// lines, and — when the symbol resolves to exactly one indexed definition — a
-/// scan of the resolved `ref_edges` for indirect/re-exported references the text
-/// scan can't see. The ref pass is skipped on ambiguous (multi-target) symbols
+/// lookup of the resolved reference graph (`ref_callers[target]`) for
+/// indirect/re-exported references the text scan can't see. The ref pass is skipped on ambiguous (multi-target) symbols
 /// to keep zero false positives, and skips modules the text pass already flagged.
 pub(super) fn check_forbid_symbol(
     sr: &SourcedRule,
@@ -342,11 +342,9 @@ pub(super) fn check_forbid_symbol(
         .map(|s| s.qualified_name.as_str())
         .collect();
     if let [target] = targets[..] {
-        for edge in &index.ref_edges {
-            if edge.to_symbol != target {
-                continue;
-            }
-            let from_module = module_of(&edge.from_symbol);
+        // O(callers of target), a direct lookup rather than a scan of every edge.
+        for from_symbol in index.ref_callers.get(target).into_iter().flatten() {
+            let from_module = module_of(from_symbol);
             if is_excepted(from_module) || text_flagged.contains(from_module) {
                 continue;
             }
@@ -355,13 +353,10 @@ pub(super) fn check_forbid_symbol(
                     Verdict::Contradicted,
                     format!("forbids `{symbol}`"),
                     sr.origin.clone(),
-                    format!(
-                        "Rule forbids `{symbol}`, but `{}` references it.",
-                        edge.from_symbol
-                    ),
+                    format!("Rule forbids `{symbol}`, but `{from_symbol}` references it."),
                 )
-                .anchored(Provenance::symbol(edge.from_symbol.clone()))
-                .with_refs(vec![edge.from_symbol.clone()]),
+                .anchored(Provenance::symbol(from_symbol.to_string()))
+                .with_refs(vec![from_symbol.to_string()]),
             );
         }
     }

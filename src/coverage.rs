@@ -229,7 +229,7 @@ mod tests {
             symbols: vec![sym("frobnicate", Visibility::Public, "m")],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![],
+            ref_callers: Default::default(),
         };
         let gaps = find_gaps(
             &index,
@@ -249,7 +249,7 @@ mod tests {
             symbols: vec![sym("frobnicate", Visibility::Public, "m")],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![],
+            ref_callers: Default::default(),
         };
         assert!(find_gaps(&index, &terms(&["frobnicate"]), &RiskSignals::default()).is_empty());
     }
@@ -263,7 +263,7 @@ mod tests {
             ],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![],
+            ref_callers: Default::default(),
         };
         assert!(find_gaps(&index, &HashSet::new(), &RiskSignals::default()).is_empty());
     }
@@ -278,7 +278,7 @@ mod tests {
             ],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![
+            ref_callers: crate::code::ref_callers_from(vec![
                 RefEdge {
                     from_symbol: "cold::cold_fn".into(),
                     to_symbol: "hot::hot_fn".into(),
@@ -287,7 +287,7 @@ mod tests {
                     from_symbol: "other::caller".into(),
                     to_symbol: "hot::hot_fn".into(),
                 },
-            ],
+            ]),
         };
         let gaps = find_gaps(&index, &HashSet::new(), &RiskSignals::default());
         assert_eq!(gaps.len(), 2);
@@ -308,7 +308,7 @@ mod tests {
             ],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![
+            ref_callers: crate::code::ref_callers_from(vec![
                 RefEdge {
                     from_symbol: "a::x".into(),
                     to_symbol: "cold::cold_fn".into(),
@@ -321,7 +321,7 @@ mod tests {
                     from_symbol: "c::z".into(),
                     to_symbol: "cold::cold_fn".into(),
                 },
-            ],
+            ]),
         };
         let mut no_codoc = HashSet::new();
         no_codoc.insert("fresh.rs".to_string()); // matches sym()'s `{module}.rs` path
@@ -347,7 +347,7 @@ mod tests {
             ],
             edges: vec![],
             module_edges: vec![],
-            ref_edges: vec![],
+            ref_callers: Default::default(),
         };
         let mut churn = HashMap::new();
         churn.insert("busy.rs".to_string(), 9);
